@@ -16,6 +16,7 @@ import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -74,6 +75,12 @@ class HmacAuthenticationFilterTest {
                         HmacAuthenticationFilter.AUTHENTICATED_APP_KEY_ATTRIBUTE
                 )
         );
+        AuthorizedApi authorizedApi = (AuthorizedApi) chain.getRequest().getAttribute(
+                HmacAuthenticationFilter.AUTHORIZED_API_ATTRIBUTE
+        );
+        assertNotNull(authorizedApi);
+        assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                authorizedApi.apiId());
         assertNotNull(response.getHeader("X-Request-Id"));
         assertArrayEquals(
                 body,
@@ -115,7 +122,8 @@ class HmacAuthenticationFilterTest {
                 appKey -> Optional.of(SECRET.clone()),
                 authenticator(nonceStore),
                 objectMapper,
-                Clock.fixed(NOW.plusSeconds(301), ZoneOffset.UTC)
+                Clock.fixed(NOW.plusSeconds(301), ZoneOffset.UTC),
+                allowingAuthorizationGate()
         );
         staleFilter.doFilter(request, response, chain);
 
@@ -574,6 +582,106 @@ class HmacAuthenticationFilterTest {
     }
 
     @Test
+    void apiWithoutGrantReturns403() throws Exception {
+        filter = filterWithResolver(
+                nonceStore,
+                appKey -> Optional.of(SECRET.clone()),
+                (appKey, method, path) -> {
+                    throw new ApiAuthorizationException(
+                            "API_NOT_GRANTED",
+                            false,
+                            "missing grant",
+                            null
+                    );
+                }
+        );
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertError(response, chain, 403, "API_NOT_GRANTED");
+    }
+
+    @Test
+    void unknownPublishedApiReturns404() throws Exception {
+        filter = filterWithResolver(
+                nonceStore,
+                appKey -> Optional.of(SECRET.clone()),
+                (appKey, method, path) -> {
+                    throw new ApiAuthorizationException(
+                            "API_NOT_FOUND",
+                            false,
+                            "missing api",
+                            null
+                    );
+                }
+        );
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertError(response, chain, 404, "API_NOT_FOUND");
+    }
+
+    @Test
+    void authorizationStoreFailureReturnsRetryable503() throws Exception {
+        filter = filterWithResolver(
+                nonceStore,
+                appKey -> Optional.of(SECRET.clone()),
+                (appKey, method, path) -> {
+                    throw new ApiAuthorizationException(
+                            "AUTHORIZATION_STORE_UNAVAILABLE",
+                            true,
+                            "database down",
+                            null
+                    );
+                }
+        );
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        JsonNode error = assertError(
+                response,
+                chain,
+                503,
+                "AUTHORIZATION_STORE_UNAVAILABLE"
+        );
+        assertTrue(error.get("retryable").asBoolean());
+        assertFalse(response.getContentAsString().contains("database"));
+    }
+
+    @Test
     void resolverSecretIsWipedAfterAuthentication() throws Exception {
         byte[] resolvedSecret = SECRET.clone();
         filter = filterWithResolver(
@@ -602,11 +710,33 @@ class HmacAuthenticationFilterTest {
             NonceReplayStore nonceStore,
             ActiveCredentialResolver resolver
     ) {
+        return filterWithResolver(
+                nonceStore,
+                resolver,
+                allowingAuthorizationGate()
+        );
+    }
+
+    private HmacAuthenticationFilter filterWithResolver(
+            NonceReplayStore nonceStore,
+            ActiveCredentialResolver resolver,
+            ApiAuthorizationGate authorizationGate
+    ) {
         return new HmacAuthenticationFilter(
                 resolver,
                 authenticator(nonceStore),
                 objectMapper,
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                authorizationGate
+        );
+    }
+
+    private ApiAuthorizationGate allowingAuthorizationGate() {
+        return (appKey, method, path) -> new AuthorizedApi(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                UUID.fromString("00000000-0000-0000-0000-000000000003"),
+                "PLATFORM_PUBLIC"
         );
     }
 
