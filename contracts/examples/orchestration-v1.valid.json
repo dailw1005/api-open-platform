@@ -1,0 +1,169 @@
+{
+  "dslVersion": "1.0",
+  "name": "user-profile-summary",
+  "timeoutMs": 6000,
+  "defaults": {
+    "vars/orders": {
+      "items": []
+    },
+    "vars/points": 0,
+    "vars/degraded": false
+  },
+  "inputSchema": {
+    "type": "object",
+    "required": ["userId"],
+    "properties": {
+      "userId": {
+        "type": "string",
+        "format": "uuid"
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "enrich",
+      "type": "try",
+      "timeoutMs": 5000,
+      "steps": [
+        {
+          "id": "getUser",
+          "type": "api",
+          "apiRef": "user-service/get-user@1",
+          "request": {
+            "pathParams": {
+              "id": {
+                "$ref": "input/userId"
+              }
+            }
+          },
+          "timeoutMs": 1500,
+          "retry": {
+            "maxAttempts": 3,
+            "backoff": {
+              "strategy": "exponential",
+              "initialMs": 200,
+              "multiplier": 2,
+              "maxMs": 1000,
+              "jitter": true
+            },
+            "retryOn": [
+              "TIMEOUT",
+              "HTTP_502",
+              "HTTP_503",
+              "HTTP_504"
+            ]
+          }
+        },
+        {
+          "id": "membership",
+          "type": "if",
+          "condition": {
+            "op": "gte",
+            "left": {
+              "$ref": "steps/getUser/body/level"
+            },
+            "right": 3
+          },
+          "then": [
+            {
+              "id": "loadDetails",
+              "type": "parallel",
+              "joinMode": "all",
+              "failureMode": "fail_fast",
+              "timeoutMs": 2500,
+              "branches": [
+                {
+                  "id": "ordersBranch",
+                  "steps": [
+                    {
+                      "id": "getOrders",
+                      "type": "api",
+                      "apiRef": "order-service/list-by-user@1",
+                      "request": {
+                        "pathParams": {
+                          "id": {
+                            "$ref": "input/userId"
+                          }
+                        }
+                      },
+                      "timeoutMs": 2000
+                    }
+                  ]
+                },
+                {
+                  "id": "pointsBranch",
+                  "steps": [
+                    {
+                      "id": "getPoints",
+                      "type": "api",
+                      "apiRef": "points-service/get-balance@1",
+                      "request": {
+                        "pathParams": {
+                          "userId": {
+                            "$ref": "input/userId"
+                          }
+                        }
+                      },
+                      "timeoutMs": 2000
+                    }
+                  ]
+                }
+              ],
+              "outputMapping": {
+                "vars/orders": {
+                  "$ref": "steps/getOrders/body"
+                },
+                "vars/points": {
+                  "$ref": "steps/getPoints/body/value"
+                }
+              }
+            }
+          ],
+          "else": [
+            {
+              "id": "resetDetails",
+              "type": "set_vars",
+              "assign": {
+                "vars/orders": {
+                  "items": []
+                },
+                "vars/points": 0
+              }
+            }
+          ]
+        },
+        {
+          "id": "markHealthy",
+          "type": "set_vars",
+          "assign": {
+            "vars/degraded": false
+          }
+        }
+      ],
+      "catch": [
+        {
+          "id": "fallback",
+          "type": "set_vars",
+          "assign": {
+            "vars/orders": {
+              "items": []
+            },
+            "vars/points": 0,
+            "vars/degraded": true
+          }
+        }
+      ]
+    }
+  ],
+  "outputMapping": {
+    "orders": {
+      "$ref": "vars/orders/items"
+    },
+    "points": {
+      "$ref": "vars/points"
+    },
+    "degraded": {
+      "$ref": "vars/degraded"
+    }
+  }
+}

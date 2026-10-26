@@ -1,0 +1,35 @@
+{
+  "dslVersion": "1.0",
+  "name": "invalid-retry-limit",
+  "timeoutMs": 1000,
+  "inputSchema": {
+    "type": "object"
+  },
+  "steps": [
+    {
+      "id": "callUser",
+      "type": "api",
+      "apiRef": "user-service/get-user@1",
+      "request": {},
+      "timeoutMs": 500,
+      "retry": {
+        "maxAttempts": 4,
+        "backoff": {
+          "strategy": "exponential",
+          "initialMs": 100,
+          "multiplier": 2,
+          "maxMs": 1000,
+          "jitter": true
+        },
+        "retryOn": [
+          "TIMEOUT"
+        ]
+      }
+    }
+  ],
+  "outputMapping": {
+    "result": {
+      "$ref": "steps/callUser/body"
+    }
+  }
+}

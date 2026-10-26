@@ -1,0 +1,4020 @@
+openapi: 3.1.0
+info:
+  title: API Open Platform Gateway and Control Plane
+  version: 0.1.0
+  description: |
+    Authoritative HTTP contract for the API Open Platform MVP.
+    Session APIs are used by the management and developer portals.
+    Public application traffic enters /open/v1/** and uses HMAC v1.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: AdminAuth
+  - name: DeveloperAuth
+  - name: Tenants
+  - name: Users
+  - name: Upstreams
+  - name: APIs
+  - name: Publications
+  - name: Policies
+  - name: Apps
+  - name: Credentials
+  - name: Grants
+  - name: Orchestrations
+  - name: Operations
+  - name: PublicGateway
+paths:
+  /platform-admin/v1/sessions:
+    post:
+      tags: [AdminAuth]
+      operationId: createAdminSession
+      summary: Sign in to the platform administration portal
+      security: []
+      x-auth-kind: NONE
+      x-required-role: NONE
+      x-tenant-scope: GLOBAL
+      x-csrf-required: false
+      x-idempotency: OPTIONAL
+      x-contract-version: "1"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionLoginRequest"
+      responses:
+        "200":
+          description: Session created
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/sessions/current:
+    delete:
+      tags: [AdminAuth]
+      operationId: deleteAdminSession
+      summary: Sign out of the platform administration portal
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "204":
+          description: Session revoked
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/sessions:
+    post:
+      tags: [DeveloperAuth]
+      operationId: createDeveloperSession
+      summary: Sign in to the developer portal
+      security: []
+      x-auth-kind: NONE
+      x-required-role: NONE
+      x-tenant-scope: GLOBAL
+      x-csrf-required: false
+      x-idempotency: OPTIONAL
+      x-contract-version: "1"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionLoginRequest"
+      responses:
+        "200":
+          description: Session created
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/sessions/current:
+    delete:
+      tags: [DeveloperAuth]
+      operationId: deleteDeveloperSession
+      summary: Sign out of the developer portal
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER|VIEWER
+      x-tenant-scope: TENANT
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "204":
+          description: Session revoked
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/tenants:
+    get:
+      tags: [Tenants]
+      operationId: listTenants
+      summary: List tenants
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/TenantStatusFilter"
+      responses:
+        "200":
+          description: Tenant page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [Tenants]
+      operationId: createTenant
+      summary: Create a tenant
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantCreateRequest"
+      responses:
+        "201":
+          description: Tenant created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/tenants/{tenantId}:
+    parameters:
+      - $ref: "#/components/parameters/TenantId"
+    get:
+      tags: [Tenants]
+      operationId: getTenant
+      summary: Get a tenant
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      responses:
+        "200":
+          description: Tenant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    patch:
+      tags: [Tenants]
+      operationId: updateTenant
+      summary: Update tenant name or status
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantPatchRequest"
+      responses:
+        "200":
+          description: Tenant updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/users/invitations:
+    post:
+      tags: [Users]
+      operationId: inviteUser
+      summary: Invite a user and assign a tenant role
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserInvitationRequest"
+      responses:
+        "202":
+          description: Invitation accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/users/{userId}/role-bindings:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      tags: [Users]
+      operationId: createRoleBinding
+      summary: Create a tenant role binding
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoleBindingCreateRequest"
+      responses:
+        "201":
+          description: Role binding created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleBinding"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/users/{userId}/role-bindings/{bindingId}:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+      - $ref: "#/components/parameters/BindingId"
+    delete:
+      tags: [Users]
+      operationId: deleteRoleBinding
+      summary: Delete a tenant role binding
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "204":
+          description: Role binding deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/upstream-endpoints:
+    get:
+      tags: [Upstreams]
+      operationId: listUpstreamEndpoints
+      summary: List upstream endpoints
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Upstream endpoint page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamEndpointPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [Upstreams]
+      operationId: createUpstreamEndpoint
+      summary: Register an upstream endpoint
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpstreamEndpointCreateRequest"
+      responses:
+        "201":
+          description: Upstream endpoint created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamEndpoint"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/upstream-endpoints/{endpointId}:
+    parameters:
+      - $ref: "#/components/parameters/EndpointId"
+    get:
+      tags: [Upstreams]
+      operationId: getUpstreamEndpoint
+      summary: Get an upstream endpoint
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      responses:
+        "200":
+          description: Upstream endpoint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamEndpoint"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    patch:
+      tags: [Upstreams]
+      operationId: updateUpstreamEndpoint
+      summary: Update an upstream endpoint
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpstreamEndpointPatchRequest"
+      responses:
+        "200":
+          description: Upstream endpoint updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamEndpoint"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/upstream-endpoints/{endpointId}/environments:
+    parameters:
+      - $ref: "#/components/parameters/EndpointId"
+    post:
+      tags: [Upstreams]
+      operationId: createUpstreamEnvironment
+      summary: Create a production or sandbox upstream environment
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpstreamEnvironmentCreateRequest"
+      responses:
+        "201":
+          description: Upstream environment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamEnvironment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/upstream-endpoints/{endpointId}/environments/{environmentId}:
+    parameters:
+      - $ref: "#/components/parameters/EndpointId"
+      - $ref: "#/components/parameters/EnvironmentId"
+    patch:
+      tags: [Upstreams]
+      operationId: updateUpstreamEnvironment
+      summary: Update an upstream environment
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpstreamEnvironmentPatchRequest"
+      responses:
+        "200":
+          description: Upstream environment updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamEnvironment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/apis:
+    get:
+      tags: [APIs]
+      operationId: listApis
+      summary: List API definitions
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/ApiStatusFilter"
+      responses:
+        "200":
+          description: API definition page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiDefinitionPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [APIs]
+      operationId: createApiDefinition
+      summary: Create an API definition
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApiDefinitionCreateRequest"
+      responses:
+        "201":
+          description: API definition created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiDefinition"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/apis/{apiId}:
+    parameters:
+      - $ref: "#/components/parameters/ApiId"
+    get:
+      tags: [APIs]
+      operationId: getApiDefinition
+      summary: Get an API definition
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      responses:
+        "200":
+          description: API definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiDefinition"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    patch:
+      tags: [APIs]
+      operationId: updateApiDefinition
+      summary: Update an API definition
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApiDefinitionPatchRequest"
+      responses:
+        "200":
+          description: API definition updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiDefinition"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/apis/{apiId}/versions:
+    parameters:
+      - $ref: "#/components/parameters/ApiId"
+    post:
+      tags: [APIs]
+      operationId: createApiVersion
+      summary: Create an immutable API version draft
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: DRAFT
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApiVersionCreateRequest"
+      responses:
+        "201":
+          description: API version created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiVersion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/apis/{apiId}/deprecate:
+    parameters:
+      - $ref: "#/components/parameters/ApiId"
+    post:
+      tags: [APIs]
+      operationId: deprecateApi
+      summary: Mark an API as deprecated
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: PUBLISHED->DEPRECATED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "200":
+          description: API deprecated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiDefinition"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/apis/{apiId}/offline:
+    parameters:
+      - $ref: "#/components/parameters/ApiId"
+    post:
+      tags: [APIs]
+      operationId: offlineApi
+      summary: Take an API offline
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: PUBLISHED|DEPRECATED->OFFLINE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "200":
+          description: API offline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiDefinition"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/api-publications:
+    post:
+      tags: [Publications]
+      operationId: createApiPublication
+      summary: Publish an API version to its production route
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: PUBLISHED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApiPublicationCreateRequest"
+      responses:
+        "201":
+          description: Publication activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiPublication"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/api-publications/{publicationId}/rollback:
+    parameters:
+      - $ref: "#/components/parameters/PublicationId"
+    post:
+      tags: [Publications]
+      operationId: rollbackApiPublication
+      summary: Roll back production to an earlier publication
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: ACTIVE->ROLLED_BACK
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "200":
+          description: Production pointer rolled back
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiDefinition"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/policies/rate-limits:
+    post:
+      tags: [Policies]
+      operationId: createRateLimitPolicy
+      summary: Create a rate-limit policy
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RateLimitPolicyCreateRequest"
+      responses:
+        "201":
+          description: Rate-limit policy created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RateLimitPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/policies/rate-limits/{policyId}:
+    parameters:
+      - $ref: "#/components/parameters/PolicyId"
+    patch:
+      tags: [Policies]
+      operationId: updateRateLimitPolicy
+      summary: Update a rate-limit policy
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RateLimitPolicyPatchRequest"
+      responses:
+        "200":
+          description: Rate-limit policy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RateLimitPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/policies/quotas:
+    post:
+      tags: [Policies]
+      operationId: createQuotaPolicy
+      summary: Create a quota policy
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuotaPolicyCreateRequest"
+      responses:
+        "201":
+          description: Quota policy created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/policies/quotas/{policyId}:
+    parameters:
+      - $ref: "#/components/parameters/PolicyId"
+    patch:
+      tags: [Policies]
+      operationId: updateQuotaPolicy
+      summary: Update a quota policy
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuotaPolicyPatchRequest"
+      responses:
+        "200":
+          description: Quota policy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/policies/prices:
+    post:
+      tags: [Policies]
+      operationId: createPriceRule
+      summary: Create a price rule
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PriceRuleCreateRequest"
+      responses:
+        "201":
+          description: Price rule created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/policies/prices/{policyId}:
+    parameters:
+      - $ref: "#/components/parameters/PolicyId"
+    patch:
+      tags: [Policies]
+      operationId: updatePriceRule
+      summary: Update a price rule
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PriceRulePatchRequest"
+      responses:
+        "200":
+          description: Price rule updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/orchestrations/{orchestrationId}/review:
+    parameters:
+      - $ref: "#/components/parameters/OrchestrationId"
+    post:
+      tags: [Orchestrations]
+      operationId: reviewOrchestration
+      summary: Approve or reject a submitted orchestration
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: IN_REVIEW->PUBLISHED|DRAFT
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrchestrationReviewRequest"
+      responses:
+        "200":
+          description: Review recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Orchestration"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/orchestrations/{orchestrationId}/publish:
+    parameters:
+      - $ref: "#/components/parameters/OrchestrationId"
+    post:
+      tags: [Orchestrations]
+      operationId: publishOrchestration
+      summary: Publish an approved tenant orchestration as a private API
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: PUBLISHED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrchestrationPublishRequest"
+      responses:
+        "201":
+          description: Orchestration API published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiPublication"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/apps/{appId}/suspend:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    post:
+      tags: [Apps]
+      operationId: suspendApp
+      summary: Suspend an application
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: ACTIVE->SUSPENDED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "200":
+          description: Application suspended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/App"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/apps/{appId}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    post:
+      tags: [Apps]
+      operationId: revokeApp
+      summary: Permanently revoke an application
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: ACTIVE|SUSPENDED->REVOKED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "200":
+          description: Application revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/App"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /platform-admin/v1/audit-logs:
+    get:
+      tags: [Operations]
+      operationId: listAuditLogs
+      summary: List audit logs
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: PLATFORM_ADMIN
+      x-tenant-scope: GLOBAL
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/TenantIdQuery"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Audit log page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/apis:
+    get:
+      tags: [APIs]
+      operationId: listPublishedApis
+      summary: List published APIs visible in the current tenant
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER|VIEWER
+      x-tenant-scope: TENANT
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Published API page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiDefinitionPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/apis/{apiId}:
+    parameters:
+      - $ref: "#/components/parameters/ApiId"
+    get:
+      tags: [APIs]
+      operationId: getPublishedApi
+      summary: Get a published API visible in the current tenant
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER|VIEWER
+      x-tenant-scope: TENANT
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      responses:
+        "200":
+          description: Published API
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiDefinition"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/apps:
+    get:
+      tags: [Apps]
+      operationId: listVisibleApps
+      summary: List apps visible to the current developer or viewer
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER|VIEWER
+      x-tenant-scope: TENANT
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: App page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [Apps]
+      operationId: createApp
+      summary: Create an application in the current tenant
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: TENANT
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppCreateRequest"
+      responses:
+        "201":
+          description: App created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/App"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/apps/{appId}:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    get:
+      tags: [Apps]
+      operationId: getVisibleApp
+      summary: Get an app visible to the current developer or viewer
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER|VIEWER
+      x-tenant-scope: TENANT
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      responses:
+        "200":
+          description: App
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/App"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    patch:
+      tags: [Apps]
+      operationId: updateOwnApp
+      summary: Update an owned app
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppPatchRequest"
+      responses:
+        "200":
+          description: App updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/App"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/apps/{appId}/credentials:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    post:
+      tags: [Credentials]
+      operationId: createAppCredential
+      summary: Create a credential and reveal its secret once
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: ACTIVE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialCreateRequest"
+      responses:
+        "201":
+          description: Credential created; secret is shown once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialSecret"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/apps/{appId}/credentials/{credentialId}/rotate:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - $ref: "#/components/parameters/CredentialId"
+    post:
+      tags: [Credentials]
+      operationId: rotateAppCredential
+      summary: Rotate a credential with a bounded overlap
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: ACTIVE->ROTATING
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialRotateRequest"
+      responses:
+        "201":
+          description: Replacement credential created; secret shown once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialSecret"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/apps/{appId}/credentials/{credentialId}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - $ref: "#/components/parameters/CredentialId"
+    post:
+      tags: [Credentials]
+      operationId: revokeAppCredential
+      summary: Revoke a credential immediately
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: ACTIVE|ROTATING->REVOKED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "200":
+          description: Credential revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Credential"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/apps/{appId}/grants:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    post:
+      tags: [Grants]
+      operationId: createApiGrant
+      summary: Grant a published API to an owned app
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: ACTIVE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantCreateRequest"
+      responses:
+        "201":
+          description: API granted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Grant"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/apps/{appId}/grants/{grantId}:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+      - $ref: "#/components/parameters/GrantId"
+    delete:
+      tags: [Grants]
+      operationId: revokeApiGrant
+      summary: Revoke an API grant
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: ACTIVE->REVOKED
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "204":
+          description: Grant revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/apps/{appId}/usage:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    get:
+      tags: [Operations]
+      operationId: getAppUsage
+      summary: Get sanitized usage for a visible app
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER|VIEWER
+      x-tenant-scope: TENANT
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/FromDate"
+        - $ref: "#/components/parameters/ToDate"
+      responses:
+        "200":
+          description: Usage summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/apps/{appId}/logs:
+    parameters:
+      - $ref: "#/components/parameters/AppId"
+    get:
+      tags: [Operations]
+      operationId: listAppRequestLogs
+      summary: List sanitized request logs for a visible app
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER|VIEWER
+      x-tenant-scope: TENANT
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/FromDate"
+        - $ref: "#/components/parameters/ToDate"
+      responses:
+        "200":
+          description: Request log page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestLogPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/orchestrations:
+    get:
+      tags: [Orchestrations]
+      operationId: listOrchestrations
+      summary: List visible orchestration drafts or published definitions
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER|VIEWER
+      x-tenant-scope: TENANT
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Orchestration page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrchestrationPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [Orchestrations]
+      operationId: createOrchestration
+      summary: Create an orchestration draft
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: TENANT
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: DRAFT
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrchestrationCreateRequest"
+      responses:
+        "201":
+          description: Orchestration draft created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Orchestration"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/orchestrations/{orchestrationId}:
+    parameters:
+      - $ref: "#/components/parameters/OrchestrationId"
+    get:
+      tags: [Orchestrations]
+      operationId: getOrchestration
+      summary: Get an orchestration draft or published definition
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER|VIEWER
+      x-tenant-scope: TENANT
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-contract-version: "1"
+      responses:
+        "200":
+          description: Orchestration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Orchestration"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    patch:
+      tags: [Orchestrations]
+      operationId: updateOrchestrationDraft
+      summary: Update a draft orchestration
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: DRAFT->DRAFT
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrchestrationPatchRequest"
+      responses:
+        "200":
+          description: Orchestration draft updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Orchestration"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/orchestrations/{orchestrationId}/validate:
+    parameters:
+      - $ref: "#/components/parameters/OrchestrationId"
+    post:
+      tags: [Orchestrations]
+      operationId: validateOrchestrationDraft
+      summary: Validate a draft using the DSL schema and semantic rules
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: DRAFT->VALIDATED|DRAFT
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrchestrationValidationResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/orchestrations/{orchestrationId}/test-runs:
+    parameters:
+      - $ref: "#/components/parameters/OrchestrationId"
+    post:
+      tags: [Orchestrations]
+      operationId: createOrchestrationTestRun
+      summary: Execute a draft against sandbox-only upstreams
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-environment: SANDBOX
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrchestrationTestRunRequest"
+      responses:
+        "202":
+          description: Sandbox test run accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrchestrationTestRun"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/orchestrations/{orchestrationId}/test-runs/{runId}:
+    parameters:
+      - $ref: "#/components/parameters/OrchestrationId"
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [Orchestrations]
+      operationId: getOrchestrationTestRun
+      summary: Get sandbox test-run status
+      security:
+        - sessionCookie: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: false
+      x-idempotency: NONE
+      x-environment: SANDBOX
+      x-contract-version: "1"
+      responses:
+        "200":
+          description: Sandbox test run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrchestrationTestRun"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /developer/v1/orchestrations/{orchestrationId}/submit:
+    parameters:
+      - $ref: "#/components/parameters/OrchestrationId"
+    post:
+      tags: [Orchestrations]
+      operationId: submitOrchestration
+      summary: Submit a validated draft for platform review
+      security:
+        - sessionCookie: []
+          csrfToken: []
+      x-auth-kind: SESSION
+      x-required-role: APP_DEVELOPER
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: true
+      x-idempotency: REQUIRED
+      x-state-transition: VALIDATED->IN_REVIEW
+      x-contract-version: "1"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyRequired"
+      responses:
+        "200":
+          description: Orchestration submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Orchestration"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /open/v1/{path}:
+    parameters:
+      - $ref: "#/components/parameters/PublicPath"
+      - $ref: "#/components/parameters/SignatureVersion"
+      - $ref: "#/components/parameters/AppKey"
+      - $ref: "#/components/parameters/Timestamp"
+      - $ref: "#/components/parameters/Nonce"
+      - $ref: "#/components/parameters/Signature"
+      - $ref: "#/components/parameters/ClientRequestId"
+      - $ref: "#/components/parameters/IdempotencyKeyOptional"
+    get:
+      tags: [PublicGateway]
+      operationId: invokePublicApiGet
+      summary: Invoke a published API with GET
+      description: Dynamic route; {path} represents the registered public path suffix.
+      security:
+        - hmacV1: []
+      x-auth-kind: HMAC_V1
+      x-required-role: APPLICATION
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: false
+      x-idempotency: OPTIONAL
+      x-dynamic-route: true
+      x-contract-version: "1"
+      responses:
+        "200":
+          $ref: "#/components/responses/PublicSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+    post:
+      tags: [PublicGateway]
+      operationId: invokePublicApiPost
+      summary: Invoke a published API with POST
+      description: Dynamic route; {path} represents the registered public path suffix.
+      security:
+        - hmacV1: []
+      x-auth-kind: HMAC_V1
+      x-required-role: APPLICATION
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: false
+      x-idempotency: OPTIONAL
+      x-dynamic-route: true
+      x-contract-version: "1"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonPayload"
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/JsonPayload"
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/PublicSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+    put:
+      tags: [PublicGateway]
+      operationId: invokePublicApiPut
+      summary: Invoke a published API with PUT
+      description: Dynamic route; {path} represents the registered public path suffix.
+      security:
+        - hmacV1: []
+      x-auth-kind: HMAC_V1
+      x-required-role: APPLICATION
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: false
+      x-idempotency: OPTIONAL
+      x-dynamic-route: true
+      x-contract-version: "1"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonPayload"
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/JsonPayload"
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/PublicSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+    patch:
+      tags: [PublicGateway]
+      operationId: invokePublicApiPatch
+      summary: Invoke a published API with PATCH
+      description: Dynamic route; {path} represents the registered public path suffix.
+      security:
+        - hmacV1: []
+      x-auth-kind: HMAC_V1
+      x-required-role: APPLICATION
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: false
+      x-idempotency: OPTIONAL
+      x-dynamic-route: true
+      x-contract-version: "1"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonPayload"
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/JsonPayload"
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "200":
+          $ref: "#/components/responses/PublicSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+    delete:
+      tags: [PublicGateway]
+      operationId: invokePublicApiDelete
+      summary: Invoke a published API with DELETE
+      description: Dynamic route; {path} represents the registered public path suffix.
+      security:
+        - hmacV1: []
+      x-auth-kind: HMAC_V1
+      x-required-role: APPLICATION
+      x-tenant-scope: RESOURCE_OWNER
+      x-csrf-required: false
+      x-idempotency: OPTIONAL
+      x-dynamic-route: true
+      x-contract-version: "1"
+      responses:
+        "200":
+          $ref: "#/components/responses/PublicSuccess"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          $ref: "#/components/responses/GatewayTimeout"
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: SESSION
+      description: HttpOnly, Secure, SameSite=Lax server-side session cookie.
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: Required for session-authenticated state-changing operations.
+    hmacV1:
+      type: apiKey
+      in: header
+      name: X-Signature
+      description: HMAC-SHA256 v1 signature; all signature headers are required.
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TenantIdQuery:
+      name: tenantId
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BindingId:
+      name: bindingId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    EndpointId:
+      name: endpointId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    EnvironmentId:
+      name: environmentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ApiId:
+      name: apiId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PublicationId:
+      name: publicationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PolicyId:
+      name: policyId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AppId:
+      name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CredentialId:
+      name: credentialId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    GrantId:
+      name: grantId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    OrchestrationId:
+      name: orchestrationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PublicPath:
+      name: path
+      in: path
+      required: true
+      description: Registered public path suffix after /open/v1/.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 1000
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    PageSize:
+      name: size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    FromDate:
+      name: from
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+    ToDate:
+      name: to
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+    TenantStatusFilter:
+      name: status
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/TenantStatus"
+    ApiStatusFilter:
+      name: status
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/ApiStatus"
+    IdempotencyKeyRequired:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+        pattern: "^[A-Za-z0-9._~-]+$"
+    IdempotencyKeyOptional:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+        pattern: "^[A-Za-z0-9._~-]+$"
+    SignatureVersion:
+      name: X-Signature-Version
+      in: header
+      required: true
+      schema:
+        const: v1
+    AppKey:
+      name: X-App-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+    Timestamp:
+      name: X-Timestamp
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: "^[0-9]{10}$"
+    Nonce:
+      name: X-Nonce
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+        pattern: "^[A-Za-z0-9_-]+$"
+    Signature:
+      name: X-Signature
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: "^[0-9a-f]{64}$"
+    ClientRequestId:
+      name: X-Client-Request-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+  headers:
+    RequestId:
+      description: Server-generated request correlation ID.
+      schema:
+        type: string
+        format: uuid
+    SessionCookie:
+      description: Secure server-side session cookie.
+      schema:
+        type: string
+    RateLimitLimit:
+      description: The strictest applicable request limit in the active window.
+      schema:
+        type: integer
+        minimum: 0
+    RateLimitRemaining:
+      description: Remaining requests in the active window.
+      schema:
+        type: integer
+        minimum: 0
+    RateLimitReset:
+      description: Seconds until the active window resets.
+      schema:
+        type: integer
+        minimum: 0
+    RetryAfter:
+      description: Seconds the client should wait before retrying.
+      schema:
+        type: integer
+        minimum: 0
+  responses:
+    PublicSuccess:
+      description: Business success response from a registered API or orchestration.
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+        X-RateLimit-Limit:
+          $ref: "#/components/headers/RateLimitLimit"
+        X-RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimitRemaining"
+        X-RateLimit-Reset:
+          $ref: "#/components/headers/RateLimitReset"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PublicSuccessEnvelope"
+        text/plain:
+          schema:
+            type: string
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Authentication failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Authorization or lifecycle state denied the operation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: State, version, or idempotency conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UnprocessableEntity:
+      description: Semantically invalid configuration or DSL
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    RateLimited:
+      description: Rate limit or quota exceeded
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+        X-RateLimit-Limit:
+          $ref: "#/components/headers/RateLimitLimit"
+        X-RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimitRemaining"
+        X-RateLimit-Reset:
+          $ref: "#/components/headers/RateLimitReset"
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    BadGateway:
+      description: Upstream returned an unusable response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ServiceUnavailable:
+      description: Required platform dependency or auth state is unavailable
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    GatewayTimeout:
+      description: Upstream or orchestration deadline exceeded
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, requestId, retryable]
+      properties:
+        code:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{2,63}$"
+        message:
+          type: string
+          maxLength: 500
+        requestId:
+          type: string
+          format: uuid
+        retryable:
+          type: boolean
+        details:
+          type: object
+          additionalProperties: true
+    PageMeta:
+      type: object
+      additionalProperties: false
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          minimum: 1
+          maximum: 100
+        totalElements:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+    SessionLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        password:
+          type: string
+          minLength: 12
+          maxLength: 256
+        mfaCode:
+          type: string
+          pattern: "^[0-9]{6}$"
+    SessionResponse:
+      type: object
+      additionalProperties: false
+      required: [userId, email, displayName, roles, expiresAt]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+          maxLength: 100
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoleBinding"
+        expiresAt:
+          type: string
+          format: date-time
+    OperationAccepted:
+      type: object
+      additionalProperties: false
+      required: [operationId, acceptedAt]
+      properties:
+        operationId:
+          type: string
+          format: uuid
+        acceptedAt:
+          type: string
+          format: date-time
+    RoleCode:
+      type: string
+      enum: [PLATFORM_ADMIN, APP_DEVELOPER, VIEWER]
+    RoleBinding:
+      type: object
+      additionalProperties: false
+      required: [id, userId, roleCode, scopeType]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        tenantId:
+          type: [string, "null"]
+          format: uuid
+        roleCode:
+          $ref: "#/components/schemas/RoleCode"
+        scopeType:
+          type: string
+          enum: [GLOBAL, TENANT]
+    RoleBindingCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [tenantId, roleCode]
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        roleCode:
+          type: string
+          enum: [APP_DEVELOPER, VIEWER]
+    UserInvitationRequest:
+      type: object
+      additionalProperties: false
+      required: [email, tenantId, roleCode]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 320
+        displayName:
+          type: string
+          maxLength: 100
+        tenantId:
+          type: string
+          format: uuid
+        roleCode:
+          type: string
+          enum: [APP_DEVELOPER, VIEWER]
+    TenantStatus:
+      type: string
+      enum: [ACTIVE, SUSPENDED]
+    Tenant:
+      type: object
+      additionalProperties: false
+      required: [id, code, name, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{2,31}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        status:
+          $ref: "#/components/schemas/TenantStatus"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TenantCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{2,31}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+    TenantPatchRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        status:
+          $ref: "#/components/schemas/TenantStatus"
+        expectedUpdatedAt:
+          type: string
+          format: date-time
+    TenantPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tenant"
+        page:
+          $ref: "#/components/schemas/PageMeta"
+    HttpMethod:
+      type: string
+      enum: [GET, POST, PUT, PATCH, DELETE]
+    UpstreamEnvironmentName:
+      type: string
+      enum: [PROD, SANDBOX]
+    UpstreamEndpoint:
+      type: object
+      additionalProperties: false
+      required: [id, code, name, method, pathTemplate, status, environments]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{2,63}$"
+        name:
+          type: string
+          maxLength: 120
+        method:
+          $ref: "#/components/schemas/HttpMethod"
+        pathTemplate:
+          type: string
+          pattern: "^/.*$"
+          maxLength: 1000
+        status:
+          type: string
+          enum: [ACTIVE, OFFLINE]
+        environments:
+          type: array
+          items:
+            $ref: "#/components/schemas/UpstreamEnvironment"
+    UpstreamEndpointCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, method, pathTemplate]
+      properties:
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{2,63}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        method:
+          $ref: "#/components/schemas/HttpMethod"
+        pathTemplate:
+          type: string
+          pattern: "^/.*$"
+          maxLength: 1000
+    UpstreamEndpointPatchRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        pathTemplate:
+          type: string
+          pattern: "^/.*$"
+          maxLength: 1000
+        status:
+          type: string
+          enum: [ACTIVE, OFFLINE]
+        expectedUpdatedAt:
+          type: string
+          format: date-time
+    UpstreamEnvironment:
+      type: object
+      additionalProperties: false
+      required: [id, environment, version, baseUrl, egressZone, tlsPolicy, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        environment:
+          $ref: "#/components/schemas/UpstreamEnvironmentName"
+        version:
+          type: integer
+          minimum: 1
+        baseUrl:
+          type: string
+          format: uri
+          pattern: "^https://"
+        authRef:
+          type: [string, "null"]
+          maxLength: 200
+        egressZone:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{2,63}$"
+        tlsPolicy:
+          type: string
+          enum: [TLS_1_2_STRICT, TLS_1_3_STRICT]
+        status:
+          type: string
+          enum: [ACTIVE, OFFLINE]
+    UpstreamEnvironmentCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [environment, baseUrl, egressZone, tlsPolicy]
+      properties:
+        environment:
+          $ref: "#/components/schemas/UpstreamEnvironmentName"
+        baseUrl:
+          type: string
+          format: uri
+          pattern: "^https://"
+        authRef:
+          type: [string, "null"]
+          maxLength: 200
+        egressZone:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{2,63}$"
+        tlsPolicy:
+          type: string
+          enum: [TLS_1_2_STRICT, TLS_1_3_STRICT]
+    UpstreamEnvironmentPatchRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        baseUrl:
+          type: string
+          format: uri
+          pattern: "^https://"
+        authRef:
+          type: [string, "null"]
+          maxLength: 200
+        egressZone:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_]{2,63}$"
+        tlsPolicy:
+          type: string
+          enum: [TLS_1_2_STRICT, TLS_1_3_STRICT]
+        status:
+          type: string
+          enum: [ACTIVE, OFFLINE]
+    UpstreamEndpointPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UpstreamEndpoint"
+        page:
+          $ref: "#/components/schemas/PageMeta"
+    ApiStatus:
+      type: string
+      enum: [DRAFT, IN_REVIEW, PUBLISHED, DEPRECATED, OFFLINE]
+    ApiKind:
+      type: string
+      enum: [PROXY, ORCHESTRATION]
+    Visibility:
+      type: string
+      enum: [PLATFORM_PUBLIC, TENANT_PRIVATE]
+    ApiDefinition:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - ownerTenantId
+        - code
+        - name
+        - publicMethod
+        - publicPath
+        - kind
+        - visibility
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        ownerTenantId:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{2,63}$"
+        name:
+          type: string
+          maxLength: 120
+        publicMethod:
+          $ref: "#/components/schemas/HttpMethod"
+        publicPath:
+          type: string
+          pattern: "^/[A-Za-z0-9._~/-]+$"
+          maxLength: 1000
+        kind:
+          $ref: "#/components/schemas/ApiKind"
+        visibility:
+          $ref: "#/components/schemas/Visibility"
+        activeProdPublicationId:
+          type: [string, "null"]
+          format: uuid
+        status:
+          $ref: "#/components/schemas/ApiStatus"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ApiDefinitionCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, publicMethod, publicPath, kind, visibility]
+      properties:
+        ownerTenantId:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{2,63}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        publicMethod:
+          $ref: "#/components/schemas/HttpMethod"
+        publicPath:
+          type: string
+          pattern: "^/[A-Za-z0-9._~/-]+$"
+          maxLength: 1000
+        kind:
+          $ref: "#/components/schemas/ApiKind"
+        visibility:
+          $ref: "#/components/schemas/Visibility"
+    ApiDefinitionPatchRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        visibility:
+          $ref: "#/components/schemas/Visibility"
+        expectedUpdatedAt:
+          type: string
+          format: date-time
+    ProxyApiConfig:
+      type: object
+      additionalProperties: false
+      required: [upstreamEndpointId]
+      properties:
+        upstreamEndpointId:
+          type: string
+          format: uuid
+        requestMapping:
+          type: object
+          additionalProperties: true
+        responseMapping:
+          type: object
+          additionalProperties: true
+    OrchestrationApiConfig:
+      type: object
+      additionalProperties: false
+      required: [orchestrationVersionId]
+      properties:
+        orchestrationVersionId:
+          type: string
+          format: uuid
+    ApiVersionCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [version, requestSchema, responseSchema, timeoutMs, config]
+      properties:
+        version:
+          type: string
+          pattern: "^[1-9][0-9]*$"
+        requestSchema:
+          type: object
+          additionalProperties: true
+        responseSchema:
+          type: object
+          additionalProperties: true
+        timeoutMs:
+          type: integer
+          minimum: 1
+          maximum: 30000
+        config:
+          oneOf:
+            - $ref: "#/components/schemas/ProxyApiConfig"
+            - $ref: "#/components/schemas/OrchestrationApiConfig"
+    ApiVersion:
+      type: object
+      additionalProperties: false
+      required: [id, apiId, version, status, requestSchema, responseSchema, timeoutMs, configChecksum, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        apiId:
+          type: string
+          format: uuid
+        version:
+          type: string
+          pattern: "^[1-9][0-9]*$"
+        status:
+          type: string
+          enum: [DRAFT, PUBLISHED, DEPRECATED, OFFLINE]
+        requestSchema:
+          type: object
+          additionalProperties: true
+        responseSchema:
+          type: object
+          additionalProperties: true
+        timeoutMs:
+          type: integer
+          minimum: 1
+          maximum: 30000
+        configChecksum:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        createdAt:
+          type: string
+          format: date-time
+    ApiDefinitionPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiDefinition"
+        page:
+          $ref: "#/components/schemas/PageMeta"
+    ApiPublicationCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [apiId, apiVersionId, visibility]
+      properties:
+        apiId:
+          type: string
+          format: uuid
+        apiVersionId:
+          type: string
+          format: uuid
+        visibility:
+          $ref: "#/components/schemas/Visibility"
+    ApiPublication:
+      type: object
+      additionalProperties: false
+      required: [id, apiId, apiVersionId, visibility, environment, status, manifestChecksum, publishedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        apiId:
+          type: string
+          format: uuid
+        apiVersionId:
+          type: string
+          format: uuid
+        visibility:
+          $ref: "#/components/schemas/Visibility"
+        environment:
+          type: string
+          const: PROD
+        status:
+          type: string
+          enum: [ACTIVE, ROLLED_BACK]
+        manifestChecksum:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        publishedAt:
+          type: string
+          format: date-time
+    ScopeType:
+      type: string
+      enum: [PLATFORM, TENANT, APP, API]
+    RateLimitPolicy:
+      type: object
+      additionalProperties: false
+      required: [id, scopeType, scopeId, limit, windowSeconds, burst, algorithm, enabled]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: [string, "null"]
+          format: uuid
+        scopeType:
+          $ref: "#/components/schemas/ScopeType"
+        scopeId:
+          type: string
+          maxLength: 100
+        limit:
+          type: integer
+          minimum: 1
+        windowSeconds:
+          type: integer
+          minimum: 1
+          maximum: 3600
+        burst:
+          type: integer
+          minimum: 0
+        algorithm:
+          type: string
+          const: TOKEN_BUCKET
+        enabled:
+          type: boolean
+    RateLimitPolicyCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [scopeType, scopeId, limit, windowSeconds, burst]
+      properties:
+        tenantId:
+          type: [string, "null"]
+          format: uuid
+        scopeType:
+          $ref: "#/components/schemas/ScopeType"
+        scopeId:
+          type: string
+          maxLength: 100
+        limit:
+          type: integer
+          minimum: 1
+        windowSeconds:
+          type: integer
+          minimum: 1
+          maximum: 3600
+        burst:
+          type: integer
+          minimum: 0
+    RateLimitPolicyPatchRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+        windowSeconds:
+          type: integer
+          minimum: 1
+          maximum: 3600
+        burst:
+          type: integer
+          minimum: 0
+        enabled:
+          type: boolean
+    QuotaPolicy:
+      type: object
+      additionalProperties: false
+      required: [id, scopeType, scopeId, period, limit, metric, enabled]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: [string, "null"]
+          format: uuid
+        scopeType:
+          $ref: "#/components/schemas/ScopeType"
+        scopeId:
+          type: string
+          maxLength: 100
+        period:
+          type: string
+          enum: [DAY, MONTH]
+        limit:
+          type: integer
+          minimum: 1
+        metric:
+          type: string
+          enum: [CALLS]
+        enabled:
+          type: boolean
+    QuotaPolicyCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [scopeType, scopeId, period, limit]
+      properties:
+        tenantId:
+          type: [string, "null"]
+          format: uuid
+        scopeType:
+          $ref: "#/components/schemas/ScopeType"
+        scopeId:
+          type: string
+          maxLength: 100
+        period:
+          type: string
+          enum: [DAY, MONTH]
+        limit:
+          type: integer
+          minimum: 1
+    QuotaPolicyPatchRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+        enabled:
+          type: boolean
+    DecimalAmount:
+      type: string
+      pattern: "^-?[0-9]+(?:\\.[0-9]{1,6})?$"
+    Currency:
+      type: string
+      pattern: "^[A-Z]{3}$"
+    PriceRule:
+      type: object
+      additionalProperties: false
+      required: [id, apiId, metric, unitPrice, currency, billableStatus, effectiveFrom]
+      properties:
+        id:
+          type: string
+          format: uuid
+        apiId:
+          type: string
+          format: uuid
+        metric:
+          type: string
+          enum: [CALL]
+        unitPrice:
+          $ref: "#/components/schemas/DecimalAmount"
+        currency:
+          $ref: "#/components/schemas/Currency"
+        billableStatus:
+          type: string
+          enum: [SUCCESS_ONLY, ALL_DISPATCHED]
+        effectiveFrom:
+          type: string
+          format: date-time
+        effectiveTo:
+          type: [string, "null"]
+          format: date-time
+    PriceRuleCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [apiId, metric, unitPrice, currency, billableStatus, effectiveFrom]
+      properties:
+        apiId:
+          type: string
+          format: uuid
+        metric:
+          type: string
+          enum: [CALL]
+        unitPrice:
+          $ref: "#/components/schemas/DecimalAmount"
+        currency:
+          $ref: "#/components/schemas/Currency"
+        billableStatus:
+          type: string
+          enum: [SUCCESS_ONLY, ALL_DISPATCHED]
+        effectiveFrom:
+          type: string
+          format: date-time
+        effectiveTo:
+          type: [string, "null"]
+          format: date-time
+    PriceRulePatchRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        unitPrice:
+          $ref: "#/components/schemas/DecimalAmount"
+        billableStatus:
+          type: string
+          enum: [SUCCESS_ONLY, ALL_DISPATCHED]
+        effectiveTo:
+          type: [string, "null"]
+          format: date-time
+    AppStatus:
+      type: string
+      enum: [ACTIVE, SUSPENDED, REVOKED]
+    App:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, name, ownerUserId, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 100
+        ownerUserId:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/AppStatus"
+        description:
+          type: string
+          maxLength: 500
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AppCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+    AppPatchRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 500
+        expectedUpdatedAt:
+          type: string
+          format: date-time
+    AppPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/App"
+        page:
+          $ref: "#/components/schemas/PageMeta"
+    CredentialStatus:
+      type: string
+      enum: [ACTIVE, ROTATING, REVOKED, EXPIRED]
+    Credential:
+      type: object
+      additionalProperties: false
+      required: [id, appId, appKey, status, createdAt, expiresAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        appId:
+          type: string
+          format: uuid
+        appKey:
+          type: string
+          minLength: 16
+          maxLength: 128
+        status:
+          $ref: "#/components/schemas/CredentialStatus"
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+    CredentialCreateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+    CredentialRotateRequest:
+      type: object
+      additionalProperties: false
+      required: [overlapSeconds]
+      properties:
+        overlapSeconds:
+          type: integer
+          minimum: 0
+          maximum: 86400
+    CredentialSecret:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - appId
+        - appKey
+        - status
+        - createdAt
+        - expiresAt
+        - secret
+        - secretShownOnce
+      properties:
+        id:
+          type: string
+          format: uuid
+        appId:
+          type: string
+          format: uuid
+        appKey:
+          type: string
+          minLength: 16
+          maxLength: 128
+        status:
+          $ref: "#/components/schemas/CredentialStatus"
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+        secret:
+          type: string
+          minLength: 32
+          maxLength: 256
+        secretShownOnce:
+          const: true
+    Grant:
+      type: object
+      additionalProperties: false
+      required: [id, appId, apiId, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        appId:
+          type: string
+          format: uuid
+        apiId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED]
+        createdAt:
+          type: string
+          format: date-time
+    GrantCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [apiId]
+      properties:
+        apiId:
+          type: string
+          format: uuid
+    OrchestrationStatus:
+      type: string
+      enum: [DRAFT, VALIDATED, IN_REVIEW, PUBLISHED, DEPRECATED, ARCHIVED]
+    Orchestration:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, code, name, status, dslVersion, dsl, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{2,63}$"
+        name:
+          type: string
+          maxLength: 120
+        ownerUserId:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/OrchestrationStatus"
+        dslVersion:
+          type: string
+          const: "1.0"
+        dsl:
+          type: object
+          additionalProperties: true
+          x-dsl-schema: "../dsl/orchestration-dsl-v1.schema.json"
+        latestPublishedVersionId:
+          type: [string, "null"]
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    OrchestrationCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name, dsl]
+      properties:
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9-]{2,63}$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 500
+        dsl:
+          type: object
+          additionalProperties: true
+          x-dsl-schema: "../dsl/orchestration-dsl-v1.schema.json"
+    OrchestrationPatchRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 500
+        dsl:
+          type: object
+          additionalProperties: true
+          x-dsl-schema: "../dsl/orchestration-dsl-v1.schema.json"
+        expectedUpdatedAt:
+          type: string
+          format: date-time
+    OrchestrationValidationIssue:
+      type: object
+      additionalProperties: false
+      required: [pointer, code, message]
+      properties:
+        pointer:
+          type: string
+          maxLength: 1000
+        code:
+          type: string
+          pattern: "^DSL_[A-Z0-9_]+$"
+        message:
+          type: string
+          maxLength: 500
+    OrchestrationValidationResult:
+      type: object
+      additionalProperties: false
+      required: [valid, issues]
+      properties:
+        valid:
+          type: boolean
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrchestrationValidationIssue"
+        requiredApis:
+          type: array
+          items:
+            type: string
+    OrchestrationReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [APPROVE, REJECT]
+        comment:
+          type: string
+          maxLength: 2000
+    OrchestrationPublishRequest:
+      type: object
+      additionalProperties: false
+      required: [orchestrationVersionId]
+      properties:
+        orchestrationVersionId:
+          type: string
+          format: uuid
+    OrchestrationTestRunRequest:
+      type: object
+      additionalProperties: false
+      required: [input]
+      properties:
+        input:
+          type: object
+          additionalProperties: true
+    OrchestrationTestRun:
+      type: object
+      additionalProperties: false
+      required: [id, orchestrationId, environment, mode, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orchestrationId:
+          type: string
+          format: uuid
+        environment:
+          type: string
+          const: SANDBOX
+        mode:
+          type: string
+          const: SANDBOX_TEST
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, SUCCEEDED, FAILED, TIMED_OUT, CANCELLED]
+        output:
+          type: [object, "null"]
+          additionalProperties: true
+        errorCode:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: [string, "null"]
+          format: date-time
+    OrchestrationPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Orchestration"
+        page:
+          $ref: "#/components/schemas/PageMeta"
+    UsageItem:
+      type: object
+      additionalProperties: false
+      required: [apiId, environment, sourceType, calls, billableCalls, amount, currency]
+      properties:
+        apiId:
+          type: string
+          format: uuid
+        apiName:
+          type: string
+        environment:
+          type: string
+          enum: [PROD]
+        sourceType:
+          type: string
+          enum: [SINGLE_API, FLOW_NODE]
+        calls:
+          type: integer
+          minimum: 0
+        billableCalls:
+          type: integer
+          minimum: 0
+        amount:
+          $ref: "#/components/schemas/DecimalAmount"
+        currency:
+          $ref: "#/components/schemas/Currency"
+    UsageSummary:
+      type: object
+      additionalProperties: false
+      required: [from, to, items]
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UsageItem"
+    RequestLogEntry:
+      type: object
+      additionalProperties: false
+      required: [requestId, appId, apiId, statusCode, latencyMs, occurredAt]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        clientRequestId:
+          type: [string, "null"]
+        appId:
+          type: string
+          format: uuid
+        apiId:
+          type: string
+          format: uuid
+        statusCode:
+          type: integer
+          minimum: 100
+          maximum: 599
+        latencyMs:
+          type: integer
+          minimum: 0
+        errorCode:
+          type: [string, "null"]
+        occurredAt:
+          type: string
+          format: date-time
+    RequestLogPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RequestLogEntry"
+        page:
+          $ref: "#/components/schemas/PageMeta"
+    AuditLogEntry:
+      type: object
+      additionalProperties: false
+      required: [id, actorId, action, resourceType, resourceId, result, occurredAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: [string, "null"]
+          format: uuid
+        actorId:
+          type: string
+          format: uuid
+        action:
+          type: string
+          maxLength: 100
+        resourceType:
+          type: string
+          maxLength: 100
+        resourceId:
+          type: string
+          maxLength: 100
+        result:
+          type: string
+          enum: [SUCCESS, DENIED, FAILED]
+        requestId:
+          type: [string, "null"]
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+    AuditLogPage:
+      type: object
+      additionalProperties: false
+      required: [items, page]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLogEntry"
+        page:
+          $ref: "#/components/schemas/PageMeta"
+    JsonPayload:
+      type: object
+      additionalProperties: true
+    PublicSuccessEnvelope:
+      type: object
+      additionalProperties: true
+      required: [requestId]
+      properties:
+        requestId:
+          type: string
+          format: uuid

@@ -1,0 +1,18 @@
+{
+  "dslVersion": "1.0",
+  "name": "invalid-unknown-node",
+  "timeoutMs": 1000,
+  "inputSchema": {
+    "type": "object"
+  },
+  "steps": [
+    {
+      "id": "runScript",
+      "type": "script",
+      "source": "return 1"
+    }
+  ],
+  "outputMapping": {
+    "result": 1
+  }
+}

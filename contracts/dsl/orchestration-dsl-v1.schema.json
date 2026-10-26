@@ -1,0 +1,532 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://api-open-platform.local/contracts/orchestration-dsl-v1.schema.json",
+  "title": "API Open Platform Orchestration DSL v1",
+  "description": "Structured, non-scriptable orchestration language for the MVP.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dslVersion",
+    "name",
+    "timeoutMs",
+    "inputSchema",
+    "steps",
+    "outputMapping"
+  ],
+  "properties": {
+    "dslVersion": {
+      "const": "1.0"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,63}$"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "timeoutMs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 30000
+    },
+    "defaults": {
+      "$ref": "#/$defs/defaults"
+    },
+    "inputSchema": {
+      "type": "object"
+    },
+    "steps": {
+      "$ref": "#/$defs/steps"
+    },
+    "outputMapping": {
+      "$ref": "#/$defs/outputMapping"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$"
+    },
+    "apiRef": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(?:/[a-z][a-z0-9-]*)+@[1-9][0-9]*$"
+    },
+    "pointer": {
+      "type": "string",
+      "pattern": "^(sys|input|vars|steps)/(?:[^~]|~[01])*$"
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["$ref"],
+      "properties": {
+        "$ref": {
+          "$ref": "#/$defs/pointer"
+        }
+      }
+    },
+    "scalar": {
+      "type": ["string", "number", "boolean", "null"]
+    },
+    "value": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/scalar"
+        },
+        {
+          "$ref": "#/$defs/reference"
+        },
+        {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/value"
+          }
+        },
+        {
+          "type": "object",
+          "maxProperties": 100,
+          "additionalProperties": {
+            "$ref": "#/$defs/value"
+          }
+        }
+      ]
+    },
+    "mapping": {
+      "type": "object",
+      "maxProperties": 100,
+      "additionalProperties": {
+        "$ref": "#/$defs/value"
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "maxProperties": 100,
+      "propertyNames": {
+        "pattern": "^vars/(?:[^~]|~[01])*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/value"
+      }
+    },
+    "outputMapping": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 100,
+      "additionalProperties": {
+        "$ref": "#/$defs/value"
+      }
+    },
+    "assignMapping": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 100,
+      "propertyNames": {
+        "pattern": "^vars/(?:[^~]|~[01])*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/value"
+      }
+    },
+    "headers": {
+      "type": "object",
+      "maxProperties": 2,
+      "propertyNames": {
+        "enum": ["Accept", "Content-Type"]
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/value"
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pathParams": {
+          "$ref": "#/$defs/mapping"
+        },
+        "query": {
+          "$ref": "#/$defs/mapping"
+        },
+        "headers": {
+          "$ref": "#/$defs/headers"
+        },
+        "body": {
+          "$ref": "#/$defs/value"
+        }
+      }
+    },
+    "backoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "initialMs", "multiplier", "maxMs", "jitter"],
+      "properties": {
+        "strategy": {
+          "const": "exponential"
+        },
+        "initialMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "multiplier": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "maxMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "jitter": {
+          "type": "boolean"
+        }
+      }
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxAttempts", "backoff", "retryOn"],
+      "properties": {
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "backoff": {
+          "$ref": "#/$defs/backoff"
+        },
+        "retryOn": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "TIMEOUT",
+              "HTTP_429",
+              "HTTP_502",
+              "HTTP_503",
+              "HTTP_504"
+            ]
+          }
+        }
+      }
+    },
+    "idempotency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "header"],
+      "properties": {
+        "mode": {
+          "const": "platform"
+        },
+        "header": {
+          "const": "Idempotency-Key"
+        }
+      }
+    },
+    "operand": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/scalar"
+        },
+        {
+          "$ref": "#/$defs/reference"
+        }
+      ]
+    },
+    "condition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "args"],
+          "properties": {
+            "op": {
+              "enum": ["and", "or"]
+            },
+            "args": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 20,
+              "items": {
+                "$ref": "#/$defs/condition"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "arg"],
+          "properties": {
+            "op": {
+              "const": "not"
+            },
+            "arg": {
+              "$ref": "#/$defs/condition"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "left", "right"],
+          "properties": {
+            "op": {
+              "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "contains"]
+            },
+            "left": {
+              "$ref": "#/$defs/operand"
+            },
+            "right": {
+              "$ref": "#/$defs/operand"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "value"],
+          "properties": {
+            "op": {
+              "const": "exists"
+            },
+            "value": {
+              "$ref": "#/$defs/operand"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["op", "left", "right"],
+          "properties": {
+            "op": {
+              "const": "in"
+            },
+            "left": {
+              "$ref": "#/$defs/operand"
+            },
+            "right": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/scalar"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "apiStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "apiRef", "request", "timeoutMs"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "const": "api"
+        },
+        "apiRef": {
+          "$ref": "#/$defs/apiRef"
+        },
+        "request": {
+          "$ref": "#/$defs/request"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "retry": {
+          "$ref": "#/$defs/retry"
+        },
+        "idempotency": {
+          "$ref": "#/$defs/idempotency"
+        }
+      }
+    },
+    "ifStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "condition", "then", "else"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "const": "if"
+        },
+        "condition": {
+          "$ref": "#/$defs/condition"
+        },
+        "then": {
+          "$ref": "#/$defs/steps"
+        },
+        "else": {
+          "$ref": "#/$defs/steps"
+        }
+      }
+    },
+    "branch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "steps"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "steps": {
+          "$ref": "#/$defs/steps"
+        }
+      }
+    },
+    "parallelStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "joinMode",
+        "failureMode",
+        "timeoutMs",
+        "branches",
+        "outputMapping"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "const": "parallel"
+        },
+        "joinMode": {
+          "const": "all"
+        },
+        "failureMode": {
+          "const": "fail_fast"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "branches": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/branch"
+          }
+        },
+        "outputMapping": {
+          "$ref": "#/$defs/outputMapping"
+        }
+      }
+    },
+    "tryStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "timeoutMs", "steps", "catch"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "const": "try"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30000
+        },
+        "steps": {
+          "$ref": "#/$defs/steps"
+        },
+        "catch": {
+          "$ref": "#/$defs/steps"
+        }
+      }
+    },
+    "setVarsStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "assign"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "const": "set_vars"
+        },
+        "assign": {
+          "$ref": "#/$defs/assignMapping"
+        }
+      }
+    },
+    "endStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "type": {
+          "const": "end"
+        },
+        "outputMapping": {
+          "$ref": "#/$defs/outputMapping"
+        }
+      }
+    },
+    "step": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/apiStep"
+        },
+        {
+          "$ref": "#/$defs/ifStep"
+        },
+        {
+          "$ref": "#/$defs/parallelStep"
+        },
+        {
+          "$ref": "#/$defs/tryStep"
+        },
+        {
+          "$ref": "#/$defs/setVarsStep"
+        },
+        {
+          "$ref": "#/$defs/endStep"
+        }
+      ]
+    }
+  },
+  "x-semantic-rules": [
+    "All node identifiers are unique within a DSL document.",
+    "An apiRef resolves only to a published single API in the same visibility scope.",
+    "An apiRef never resolves to an orchestration API.",
+    "Nested step timeouts do not exceed the parent scope timeout.",
+    "Parallel branches do not write the same parent vars path.",
+    "A non-idempotent API retry requires idempotency mode=platform and upstream support.",
+    "Every reference resolves before execution.",
+    "The total DSL byte size does not exceed 256 KiB.",
+    "The total node count does not exceed 100.",
+    "The nesting depth does not exceed 10."
+  ]
+}
