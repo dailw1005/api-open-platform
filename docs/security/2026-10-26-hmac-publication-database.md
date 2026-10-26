@@ -4,12 +4,13 @@
 
 - HMAC v1 canonicalization and golden vectors.
 - HMAC Servlet Filter authentication, request-body limits, error mapping and replay ordering.
-- Spring Boot runtime registration, JDBC credential resolution and KMS decryptor boundary.
+- Spring Boot runtime registration, JDBC credential resolution and concrete AWS KMS decryptor.
+- Exact-route application/API authorization and pre-authentication rate limiting.
 - Publication activation guard.
-- PostgreSQL foundation and active-credential lookup migrations, composite tenant keys, RLS and active-publication triggers.
+- PostgreSQL foundation, credential and API authorization lookup migrations, composite tenant keys, RLS and active-publication triggers.
 
-This review does not claim that a concrete KMS adapter, application/API
-authorization, rate limiting or upstream routing is complete.
+This review does not claim that real staging AWS KMS/key-policy validation,
+trusted proxy IP extraction, post-auth app/API quotas or upstream routing is complete.
 
 ## Checklist
 
@@ -23,6 +24,10 @@ authorization, rate limiting or upstream routing is complete.
 | Runtime registration | PASS | A Spring Boot integration test starts embedded Tomcat, posts a signed HTTP request through the registered Filter, consumes the Nonce and rejects replay. |
 | Credential lookup privilege | PASS | `auth_resolve_active_credential` is `SECURITY DEFINER`, has a fixed `search_path`, revokes `PUBLIC`, and is tested through the non-superuser `app_runtime` role with explicit `EXECUTE`. |
 | Credential lifecycle | PASS | Active and unexpired rotating credentials resolve; suspended tenant/app, revoked and expired credentials return no row. |
+| KMS encryption context | PASS | AWS KMS decrypt requests bind `tenantId`, `appId`, `credentialId` and `appKey`; 429/5xx and transport errors are retryable, deterministic KMS failures are not. |
+| Database role verification | PASS | Startup rejects superuser/BYPASSRLS roles, requires both authentication function grants, and rejects direct `app_credential` DML access. The runtime E2E test uses a restricted login role. |
+| API authorization | PASS | Exact active method/path, PROD publication, tenant visibility and ACTIVE app grant are required after signature/Nonce verification; no-grant returns 403 and unpublished/foreign-private routes return 404. |
+| Pre-auth rate limit | PASS | Redis Lua applies atomic fixed-window per-IP limiting before Header/body processing; denial is 429 with standard Headers and Redis errors fail closed as 503. |
 | Injection | PASS | Database integration tests use prepared statements; migrations use static SQL and typed parameters. |
 | Tenant isolation | PASS | Composite foreign keys, RLS policies and cross-tenant insert/select tests pass on PostgreSQL 18.6. |
 | Publication integrity | PASS | Guard plus database trigger reject non-PROD, mismatched, revoked and reparented active publications. |
@@ -50,7 +55,7 @@ authorization, rate limiting or upstream routing is complete.
 - **Severity:** High before the fix
 - **Risk:** The verifier and replay guard were not connected to the public HTTP boundary, so valid and invalid request handling depended on future integration code.
 - **Fix:** Added `HmacAuthenticationFilter`, raw-body caching, a 1 MiB limit, request IDs, stable error mapping and defensive Secret wiping. Signature/timestamp verification happens before nonce claim.
-- **Evidence:** `HmacAuthenticationFilterTest` contains 22 tests covering success, body replay to downstream, 400/401/413/500/503 mappings, oversized streamed bodies, credential-store failure, internal-configuration redaction and exact public-path matching.
+- **Evidence:** `HmacAuthenticationFilterTest` covers success, body replay, rate limiting, authorization, 400/401/403/404/413/429/500/503 mappings and Secret redaction.
 
 ### Fixed in follow-up: ambiguous Content-Length headers were accepted
 
@@ -90,11 +95,26 @@ authorization, rate limiting or upstream routing is complete.
 - **Residual risk:** Each in-flight signed request can retain a body of up to 1 MiB for canonicalization and downstream replay. A large unauthenticated concurrency burst can create memory pressure.
 - **Required follow-up:** Enforce ingress body limits, pre-auth IP/connection rate limits, bounded server concurrency and route-specific lower limits. Revisit streaming hashing plus bounded spooling if maximum body sizes grow.
 
-### Open deployment prerequisite: concrete KMS adapter and database grants
+### Fixed: credential decryption and database role were not production adapters
 
-- **Severity:** High before production startup
-- **Residual risk:** The app intentionally fails startup without a `CredentialSecretDecryptor` bean. Tests use a deterministic decryptor, not a real cloud KMS call. The production gateway DB role must also be granted `EXECUTE` on the lookup function while remaining restricted elsewhere.
-- **Required follow-up:** Implement the selected KMS adapter with authenticated encryption context/AAD, timeout/retry classification and no plaintext logging; provision and test the least-privilege database role in a staging environment.
+- **Severity:** High before the fix
+- **Risk:** The runtime only had a KMS port fake and did not reject an overprivileged database login.
+- **Fix:** Added `AwsKmsCredentialSecretDecryptor` with exact encryption context, 3-second timeout and typed retry classification. Added startup role verification for both lookup functions, superuser, BYPASSRLS and direct credential-table access. The HTTP E2E test now uses a restricted PostgreSQL login role.
+- **Evidence:** `AwsKmsCredentialSecretDecryptorTest`, `GatewayDatabaseRoleVerifierTest`, `RuntimeHmacIntegrationTest`.
+
+### Fixed: signed callers were not checked against app/API grants
+
+- **Severity:** High before the fix
+- **Risk:** A valid app credential could reach any `/open/v1/**` route without an ACTIVE application grant.
+- **Fix:** Added `auth_authorize_public_api` and `JdbcApiAuthorizationGate`; authorization runs only after signature verification and Nonce claim.
+- **Evidence:** `ApiAuthorizationLookupTest`, `JdbcApiAuthorizationGateTest`, `HmacAuthenticationFilterTest`, `RuntimeHmacIntegrationTest`.
+
+### Fixed: requests reached expensive authentication without a coarse abuse limit
+
+- **Severity:** High before the fix
+- **Risk:** Arbitrary clients could force HMAC parsing, database lookup and KMS decryption without a pre-auth budget.
+- **Fix:** Added a Redis Lua fixed-window per-IP limiter before Header/body processing, standard rate-limit Headers, 429 and fail-closed 503.
+- **Evidence:** `RedisPreAuthRateLimiterTest`, `HmacAuthenticationFilterTest`, `RuntimeHmacIntegrationTest`.
 
 ### Accepted: every authenticated request performs database and KMS work
 
@@ -102,9 +122,33 @@ authorization, rate limiting or upstream routing is complete.
 - **Residual risk:** The current resolver has no Secret cache. Revocation is immediate, but request latency and dependency load include PostgreSQL lookup plus KMS decryption for every valid request.
 - **Required follow-up:** Establish QPS/latency targets, add bounded load tests, then introduce a short-TTL cache only with app/credential epoch validation and an explicit maximum staleness window.
 
+### Open deployment prerequisite: real staging KMS and role validation
+
+- **Severity:** High before production startup
+- **Residual risk:** Embedded tests prove request shape and classification, but not the real AWS account, key policy, credential provider, network path, latency or database grants.
+- **Required follow-up:** Execute `docs/operations/staging-security-validation.md` against staging AWS KMS, PostgreSQL login role, Redis TLS and the deployed container identity.
+
+### Accepted: pre-auth limiting uses `remoteAddr`
+
+- **Severity:** High if deployed behind an unconfigured reverse proxy
+- **Residual risk:** Without trusted proxy configuration, all clients can appear as the proxy address, causing shared exhaustion; blindly trusting client-supplied `X-Forwarded-For` permits bypass.
+- **Required follow-up:** Terminate untrusted traffic at a trusted ingress and configure an explicit proxy allowlist and IP extraction rule, or enforce equivalent ingress and connection limits.
+
+### Accepted: fixed window and per-IP-only rate limiting
+
+- **Severity:** Medium
+- **Residual risk:** A boundary burst can approach twice the configured rate, NAT clients share a bucket, and authenticated per-app/API quotas are not yet enforced.
+- **Required follow-up:** Add per-app/API post-auth token-bucket or sliding-window limits, quotas and load tests; retain the pre-auth limit as one defense layer.
+
+### Accepted: authorization uses exact route matching
+
+- **Severity:** Medium
+- **Residual risk:** APIs with path parameters are not matched by `auth_authorize_public_api`; treating templates as literals would make them unreachable or, if changed carelessly, risks ambiguous authorization.
+- **Required follow-up:** Add a reviewed route-template compiler with precedence and ambiguity tests before enabling parameterized public paths.
+
 ## Verdict
 
-No unresolved High finding remains in the implemented component slice. The
-concrete KMS adapter and production database grants remain explicit High
-deployment prerequisites; remaining Medium residuals are tracked in the TDD
-evidence report.
+No unresolved High finding remains in the implemented and locally tested
+component boundaries. Real staging dependencies and trusted client-IP
+configuration remain explicit High deployment prerequisites; remaining Medium
+residuals are tracked in the TDD evidence report.

@@ -15,6 +15,8 @@ for:
 `V1__foundation.sql` creates the schema and invariants.
 `V2__active_credential_lookup.sql` adds the constrained gateway authentication
 lookup function.
+`V3__api_authorization_lookup.sql` adds exact-route application/grant
+authorization.
 
 Runtime target: PostgreSQL 16+; integration tests run against embedded PostgreSQL 18.6.
 
@@ -58,6 +60,25 @@ Production provisioning must create the gateway database role outside Flyway
 and grant `EXECUTE` on this function. The role should not receive unrestricted
 tenant-table access or `BYPASSRLS`.
 
+## API Authorization Lookup
+
+`auth_authorize_public_api(appKey, method, path)` is also a `SECURITY DEFINER`
+function with a fixed `search_path`. It:
+
+- revalidates the ACTIVE credential, app and tenant;
+- finds an exact `PUBLIC_METHOD`/`PUBLIC_PATH` match whose
+  `active_prod_publication_id` references an ACTIVE PROD publication;
+- allows `PLATFORM_PUBLIC` across tenants but requires `TENANT_PRIVATE` API
+  ownership to match the credential tenant;
+- requires an ACTIVE `app_api_grant`;
+- returns stable decisions `ALLOWED`, `API_NOT_FOUND`, `API_NOT_GRANTED` or
+  `INVALID_CREDENTIAL`;
+- revokes execution from `PUBLIC`.
+
+Gateway startup verifies `EXECUTE` on both `auth_resolve_active_credential` and
+`auth_authorize_public_api`, rejects superuser/BYPASSRLS roles, and verifies the
+role has no direct `app_credential` DML privileges.
+
 ## Test Command
 
 ```bash
@@ -77,6 +98,9 @@ The tests use native embedded PostgreSQL, run Flyway, assume a non-superuser run
 - a superseded publication cannot remain referenced by the active pointer at commit.
 - active credentials resolve without a tenant GUC through the restricted function;
 - rotating, suspended, revoked and expired credential paths fail closed.
+- exact published routes with ACTIVE grants return ALLOWED;
+- missing/revoked grants, private cross-tenant APIs and credential races fail
+  with stable decisions.
 
 ## Out Of Scope
 

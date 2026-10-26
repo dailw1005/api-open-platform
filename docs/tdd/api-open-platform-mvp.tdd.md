@@ -5,6 +5,7 @@
 - Approved plan: `plans/api-open-platform-mvp.md`
 - Contract map: `docs/tdd/api-open-platform-mvp.contract-map.md`
 - Gate 0 contract: `docs/contracts/gate-0.md`
+- Staging security runbook: `docs/operations/staging-security-validation.md`
 
 ## Gate 0 Contract Cycle
 
@@ -155,6 +156,36 @@
 - **Coverage:** runtime line 97.56% (80/82), branch 84.38% (27/32); gateway line 93.41% (510/546), branch 81.79% (265/324).
 - **Known gap:** tests use a deterministic decryptor, not a concrete cloud KMS adapter. The production database role grant and request-level capacity also require staging validation.
 
+## AWS KMS And Database Role Slice
+
+- **RED:** `mvn -pl platform-app -am test` failed compilation because `AwsKmsCredentialSecretDecryptor`, role verification and KMS startup configuration did not exist.
+- **AWS KMS:** The adapter sends stored KMS ciphertext with key ID and exact `tenantId/appId/credentialId/appKey` encryption context. A 3-second API timeout bounds dependency latency.
+- **Failure classification:** KMS 429, 5xx and SDK transport failures map to retryable 503; invalid ciphertext, policy/key failures and empty plaintext map to non-retryable 500. KMS messages are not exposed.
+- **Role verifier:** Startup rejects superuser and BYPASSRLS roles, requires `EXECUTE` on credential and authorization functions, and rejects direct `app_credential` DML. E2E connects as `gateway_staging`, rather than the database superuser.
+- **GREEN:** `mvn -pl platform-app -am verify`
+- **Tests:** 8 AWS KMS tests and 5 real PostgreSQL role tests at this checkpoint.
+- **Git evidence:** RED `89fe275`; GREEN `539c653`.
+
+## Application And API Authorization Slice
+
+- **RED:** Filter authorization types were missing and PostgreSQL did not define `auth_authorize_public_api`.
+- **Database:** V3 performs exact method/path matching, requires an ACTIVE PROD publication, enforces `TENANT_PRIVATE` tenant ownership, and checks an ACTIVE app grant.
+- **Filter ordering:** Authorization runs after signature verification and Nonce claim. Missing grant maps to 403, inactive/foreign-private route to 404, credential race to 401, and authorization storage failure to retryable 503.
+- **GREEN:** `mvn -pl platform-app -am verify`
+- **Tests:** 4 PostgreSQL authorization tests, 5 JDBC gate tests and updated Filter/Tomcat integration tests.
+- **Git evidence:** RED `df92e74`; GREEN `9f367db`.
+
+## Pre-Authentication Rate Limit Slice
+
+- **RED:** Pre-auth limiter types were missing and no limit ran before Header/body processing.
+- **Redis algorithm:** One Lua command performs `INCR`, first-hit `PEXPIRE` and `PTTL`. Keys contain a fixed-window bucket and SHA-256 of `remoteAddr`.
+- **HTTP boundary:** Allowed requests receive limit/remaining/reset Headers; denied requests receive 429, `Retry-After`, and retryable `RATE_LIMITED`; Redis failure is fail-closed 503.
+- **Boundary RED:** `Duration.ofNanos(1)` passed construction and would divide by zero after millisecond truncation.
+- **Boundary fix:** Rate-limit windows must be at least 1 ms.
+- **GREEN:** `mvn verify`
+- **Coverage:** gateway line 93.15% (626/672), branch 81.47% (321/394); runtime line 95.57% (194/203), branch 83.72% (72/86).
+- **Git evidence:** RED `882e814`; GREEN `9797dd0`; boundary RED `ebd1614`; GREEN `3376f7e`.
+
 ## Git Checkpoints
 
 | Slice | RED | GREEN | Follow-up |
@@ -166,6 +197,9 @@
 | HMAC authentication filter | `25fec7b` | `fe37c4f` | `c140907` RED, `e17b418` Content-Length hardening |
 | Active credential lookup | `d286fc6` | `b22e22b` | Function, typed credential errors |
 | Runtime gateway composition | `3e36dce` | `eaa0f08` | Spring Boot, JDBC resolver, KMS port, HTTP integration |
+| AWS KMS and staging role | `89fe275` | `539c653` | Concrete decryptor, role startup verification |
+| App/API authorization | `df92e74` | `9f367db` | V3 decision function and Filter gate |
+| Pre-auth rate limit | `882e814` | `9797dd0` | `ebd1614` RED, `3376f7e` sub-ms boundary fix |
 
 ## Final Verification
 
@@ -173,19 +207,19 @@
 - **Result:** BUILD SUCCESS
 - **Contract tests:** 13 passed
 - **Flow validator tests:** 21 passed
-- **Gateway tests:** 88 passed
+- **Gateway tests:** 100 passed
 - **Publication guard tests:** 9 passed
-- **PostgreSQL tests:** 13 passed
-- **Runtime tests:** 17 passed
-- **Total tests:** 161 passed, 0 failed, 0 errors, 0 skipped
-- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 93.41%/branch 81.79%; control line 100%/branch 95.00%; runtime line 97.56%/branch 84.38%
+- **PostgreSQL tests:** 17 passed
+- **Runtime tests:** 38 passed
+- **Total tests:** 198 passed, 0 failed, 0 errors, 0 skipped
+- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 93.15%/branch 81.47%; control line 100%/branch 95.00%; runtime line 95.57%/branch 83.72%
 
 ## Self Evaluation
 
 | Axis | Score | Evidence |
 | --- | --- | --- |
-| Accuracy | 5 | OpenAPI parses, all 161 tests pass, PostgreSQL constraints, Redis replay behavior and a real Tomcat HTTP path are exercised, and JaCoCo gates pass. |
-| Completeness | 4 | Gate 0, semantic validation, HMAC verification, Servlet Filter, runtime registration, JDBC credential lookup, publication guard and DB foundation are complete. Concrete KMS, authorization/rate limiting, proxy/orchestration execution and usage/audit persistence remain future TDD slices. |
+| Accuracy | 5 | OpenAPI parses, all 198 tests pass, PostgreSQL constraints, AWS KMS request semantics, Redis replay/rate limiting and a real restricted-role Tomcat HTTP path are exercised, and JaCoCo gates pass. |
+| Completeness | 4 | Gate 0, semantic validation, HMAC verification, AWS KMS, role verification, app/API authorization, pre-auth rate limiting, publication guard and DB foundation are complete. Staging dependencies, trusted proxy IP handling, post-auth quotas, routing/orchestration execution and usage/audit persistence remain future TDD slices. |
 | Clarity | 4 | Contracts, test map and evidence report are linked and use stable error codes. The OpenAPI artifact is large and will benefit from generated documentation. |
 | Actionability | 5 | `mvn verify` is the single validation command. The contract map identifies the next RED targets. |
 | Conciseness | 4 | Test and contract artifacts are focused; the full OpenAPI file is large but serves as the authoritative consumer boundary. |
@@ -194,8 +228,8 @@
 
 **Highest-impact improvements:**
 
-1. Implement the concrete KMS decryptor and validate least-privilege database/Redis/KMS configuration in staging.
-2. Add application/grant/API lifecycle authorization plus pre-auth and post-auth rate limiting.
-3. Enforce DSL byte, node, depth and cumulative runtime budgets, then add usage/request/audit partition migrations.
+1. Validate AWS KMS, PostgreSQL role, Redis TLS and trusted proxy client-IP handling in staging.
+2. Add per-app/API post-auth token-bucket limits and daily/monthly quotas with load tests.
+3. Add route-template resolution, upstream proxy/orchestration execution and usage/request/audit persistence.
 
-**Self-check:** The 4.4 score reflects that the requested runtime credential-resolution slice is verifiably complete, while concrete KMS, authorization, routing and runtime persistence features are explicitly identified.
+**Self-check:** The 4.4 score reflects that KMS, role verification, authorization and pre-auth limiting are verifiably complete locally, while real staging dependencies, proxy trust, routing and persistence are explicitly identified.
