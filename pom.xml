@@ -15,6 +15,7 @@
         <module>gateway-runtime</module>
         <module>platform-control</module>
         <module>platform-persistence</module>
+        <module>platform-app</module>
     </modules>
 
     <properties>
@@ -24,6 +25,7 @@
         <networknt-json-schema.version>1.5.9</networknt-json-schema.version>
         <swagger-parser.version>2.1.48</swagger-parser.version>
         <jackson.version>2.18.2</jackson.version>
+        <spring-boot.version>3.5.11</spring-boot.version>
         <maven-compiler-plugin.version>3.14.1</maven-compiler-plugin.version>
         <maven-surefire-plugin.version>3.5.4</maven-surefire-plugin.version>
     </properties>
