@@ -56,13 +56,15 @@ public final class HmacAuthenticationFilter implements Filter {
     private final ObjectMapper objectMapper;
     private final Clock clock;
     private final ApiAuthorizationGate authorizationGate;
+    private final PreAuthRateLimiter preAuthRateLimiter;
 
     public HmacAuthenticationFilter(
             ActiveCredentialResolver credentialResolver,
             HmacRequestAuthenticator authenticator,
             ObjectMapper objectMapper,
             Clock clock,
-            ApiAuthorizationGate authorizationGate
+            ApiAuthorizationGate authorizationGate,
+            PreAuthRateLimiter preAuthRateLimiter
     ) {
         this.credentialResolver = Objects.requireNonNull(
                 credentialResolver,
@@ -74,6 +76,10 @@ public final class HmacAuthenticationFilter implements Filter {
         this.authorizationGate = Objects.requireNonNull(
                 authorizationGate,
                 "authorizationGate"
+        );
+        this.preAuthRateLimiter = Objects.requireNonNull(
+                preAuthRateLimiter,
+                "preAuthRateLimiter"
         );
     }
 
@@ -102,6 +108,33 @@ public final class HmacAuthenticationFilter implements Filter {
         String requestId = UUID.randomUUID().toString();
         request.setAttribute(REQUEST_ID_ATTRIBUTE, requestId);
         response.setHeader("X-Request-Id", requestId);
+
+        RateLimitDecision rateLimitDecision;
+        try {
+            rateLimitDecision = preAuthRateLimiter.check(
+                    request.getRemoteAddr()
+            );
+        } catch (PreAuthRateLimitException exception) {
+            writeError(
+                    response,
+                    requestId,
+                    503,
+                    exception.code(),
+                    exception.retryable()
+            );
+            return;
+        }
+        writeRateLimitHeaders(response, rateLimitDecision);
+        if (!rateLimitDecision.allowed()) {
+            writeError(
+                    response,
+                    requestId,
+                    429,
+                    "RATE_LIMITED",
+                    true
+            );
+            return;
+        }
 
         HttpServletRequest authenticatedRequest;
         try {
@@ -385,6 +418,30 @@ public final class HmacAuthenticationFilter implements Filter {
         );
     }
 
+    private void writeRateLimitHeaders(
+            HttpServletResponse response,
+            RateLimitDecision decision
+    ) {
+        response.setHeader(
+                "X-RateLimit-Limit",
+                Integer.toString(decision.limit())
+        );
+        response.setHeader(
+                "X-RateLimit-Remaining",
+                Integer.toString(decision.remaining())
+        );
+        response.setHeader(
+                "X-RateLimit-Reset",
+                Long.toString(decision.resetAfterSeconds())
+        );
+        if (!decision.allowed()) {
+            response.setHeader(
+                    "Retry-After",
+                    Long.toString(decision.resetAfterSeconds())
+            );
+        }
+    }
+
     private String messageFor(String code) {
         return switch (code) {
             case "REQUEST_TOO_LARGE" -> "Request body is too large";
@@ -407,6 +464,9 @@ public final class HmacAuthenticationFilter implements Filter {
             case "API_NOT_GRANTED" -> "Application is not granted this API";
             case "AUTHORIZATION_STORE_UNAVAILABLE" ->
                     "Authorization service is unavailable";
+            case "RATE_LIMITED" -> "Request rate limit exceeded";
+            case "RATE_LIMIT_UNAVAILABLE" ->
+                    "Rate limiting service is unavailable";
             default -> "Authentication failed";
         };
     }

@@ -12,6 +12,8 @@ import com.apiproject.gateway.security.HmacVerifier;
 import com.apiproject.gateway.security.JedisNonceReplayStore;
 import com.apiproject.gateway.security.NonceReplayGuard;
 import com.apiproject.gateway.security.NonceReplayStore;
+import com.apiproject.gateway.security.PreAuthRateLimiter;
+import com.apiproject.gateway.security.RedisPreAuthRateLimiter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -27,7 +29,10 @@ import javax.sql.DataSource;
 import java.time.Clock;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(GatewaySecurityProperties.class)
+@EnableConfigurationProperties({
+        GatewaySecurityProperties.class,
+        PreAuthRateLimitProperties.class
+})
 public class RuntimeSecurityConfiguration {
 
     @Bean(destroyMethod = "close")
@@ -38,6 +43,20 @@ public class RuntimeSecurityConfiguration {
     @Bean
     NonceReplayStore nonceReplayStore(JedisPooled jedis) {
         return new JedisNonceReplayStore(jedis);
+    }
+
+    @Bean
+    PreAuthRateLimiter preAuthRateLimiter(
+            JedisPooled jedis,
+            PreAuthRateLimitProperties properties,
+            Clock clock
+    ) {
+        return new RedisPreAuthRateLimiter(
+                jedis,
+                properties.requests(),
+                properties.window(),
+                clock
+        );
     }
 
     @Bean
@@ -91,7 +110,8 @@ public class RuntimeSecurityConfiguration {
             HmacRequestAuthenticator authenticator,
             ObjectMapper objectMapper,
             Clock clock,
-            ApiAuthorizationGate authorizationGate
+            ApiAuthorizationGate authorizationGate,
+            PreAuthRateLimiter preAuthRateLimiter
     ) {
         FilterRegistrationBean<HmacAuthenticationFilter> registration =
                 new FilterRegistrationBean<>();
@@ -101,7 +121,8 @@ public class RuntimeSecurityConfiguration {
                 authenticator,
                 objectMapper,
                 clock,
-                authorizationGate
+                authorizationGate,
+                preAuthRateLimiter
         ));
         registration.addUrlPatterns("/*");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 20);

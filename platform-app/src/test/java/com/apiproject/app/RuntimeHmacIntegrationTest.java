@@ -86,6 +86,10 @@ class RuntimeHmacIntegrationTest {
                 () -> "redis://127.0.0.1:" + REDIS_PORT
         );
         registry.add("gateway.security.kms.enabled", () -> "false");
+        registry.add(
+                "gateway.security.pre-auth-rate-limit.requests",
+                () -> "100"
+        );
     }
 
     @AfterAll
@@ -127,6 +131,10 @@ class RuntimeHmacIntegrationTest {
         assertEquals(200, success.statusCode(), success.body());
         assertTrue(success.body().contains(appKey));
         assertTrue(success.headers().firstValue("X-Request-Id").isPresent());
+        assertEquals(
+                "100",
+                success.headers().firstValue("X-RateLimit-Limit").orElseThrow()
+        );
         assertEquals(401, replay.statusCode());
         assertTrue(replay.body().contains("NONCE_REPLAYED"));
     }
