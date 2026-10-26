@@ -149,16 +149,20 @@ class DatabaseFoundationTest {
     void rowLevelSecurityFiltersAndRejectsOtherTenants() throws Exception {
         UUID tenantA = UUID.randomUUID();
         UUID tenantB = UUID.randomUUID();
-        UUID user = UUID.randomUUID();
+        UUID userA = UUID.randomUUID();
+        UUID userB = UUID.randomUUID();
         UUID appA = UUID.randomUUID();
+        UUID appA2 = UUID.randomUUID();
         UUID appB = UUID.randomUUID();
 
         try (Connection connection = dataSource.getConnection()) {
             insertTenant(connection, tenantA, "rls-a");
             insertTenant(connection, tenantB, "rls-b");
-            insertUserAndRole(connection, tenantA, user, "rls@example.com", "APP_DEVELOPER");
-            insertApp(connection, tenantA, user, appA, "app-a");
-            insertApp(connection, tenantA, user, appB, "app-b");
+            insertUserAndRole(connection, tenantA, userA, "rls-a@example.com", "APP_DEVELOPER");
+            insertUserAndRole(connection, tenantB, userB, "rls-b@example.com", "APP_DEVELOPER");
+            insertApp(connection, tenantA, userA, appA, "app-a-1");
+            insertApp(connection, tenantA, userA, appA2, "app-a-2");
+            insertApp(connection, tenantB, userB, appB, "app-b");
         }
 
         try (Connection connection = dataSource.getConnection()) {
@@ -178,10 +182,97 @@ class DatabaseFoundationTest {
 
             SQLException exception = assertThrows(
                     SQLException.class,
-                    () -> insertApp(connection, tenantB, user, UUID.randomUUID(), "cross-tenant")
+                    () -> insertApp(
+                            connection,
+                            tenantB,
+                            userB,
+                            UUID.randomUUID(),
+                            "cross-tenant"
+                    )
             );
             assertEquals("42501", exception.getSQLState());
             connection.rollback();
+        }
+    }
+
+    @Test
+    void activatesMatchingActiveProductionPublication() throws Exception {
+        UUID tenant = UUID.randomUUID();
+        UUID user = UUID.randomUUID();
+        UUID api = UUID.randomUUID();
+        UUID version = UUID.randomUUID();
+        UUID publication = UUID.randomUUID();
+
+        try (Connection connection = dataSource.getConnection()) {
+            insertTenant(connection, tenant, "active-publication");
+            insertUserAndRole(connection, tenant, user, "active@example.com", "APP_DEVELOPER");
+            insertApiDefinition(connection, tenant, api, "active-api", "/v1/active");
+            insertApiVersion(connection, api, user, version);
+            insertPublicationWithId(
+                    connection,
+                    publication,
+                    api,
+                    tenant,
+                    version,
+                    user,
+                    "PROD",
+                    "ACTIVE",
+                    1
+            );
+
+            activatePublication(connection, api, publication);
+
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    SELECT active_prod_publication_id
+                    FROM api_definition
+                    WHERE id = ?
+                    """)) {
+                statement.setObject(1, api);
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    resultSet.next();
+                    assertEquals(publication, resultSet.getObject(1, UUID.class));
+                }
+            }
+        }
+    }
+
+    @Test
+    void rejectsMultipleActivePublicationsForOneApi() throws Exception {
+        UUID tenant = UUID.randomUUID();
+        UUID user = UUID.randomUUID();
+        UUID api = UUID.randomUUID();
+        UUID version = UUID.randomUUID();
+
+        try (Connection connection = dataSource.getConnection()) {
+            insertTenant(connection, tenant, "single-active");
+            insertUserAndRole(connection, tenant, user, "single@example.com", "APP_DEVELOPER");
+            insertApiDefinition(connection, tenant, api, "single-api", "/v1/single");
+            insertApiVersion(connection, api, user, version);
+            insertPublication(
+                    connection,
+                    api,
+                    tenant,
+                    version,
+                    user,
+                    "PROD",
+                    "ACTIVE",
+                    1
+            );
+
+            SQLException exception = assertThrows(
+                    SQLException.class,
+                    () -> insertPublication(
+                            connection,
+                            api,
+                            tenant,
+                            version,
+                            user,
+                            "PROD",
+                            "ACTIVE",
+                            2
+                    )
+            );
+            assertEquals("23505", exception.getSQLState());
         }
     }
 
