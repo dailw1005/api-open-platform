@@ -1,6 +1,6 @@
 # API 开放平台 MVP 整体方案与实施蓝图
 
-> 状态：Approved；Gate 0、FlowValidator、HMAC v1 签名/验证/防重放与 Servlet Filter、Publication Guard、PostgreSQL 基础迁移均已 GREEN。
+> 状态：Approved；Gate 0、FlowValidator、HMAC v1 签名/验证/防重放、Servlet Filter、Spring Boot 运行时与 JDBC 凭证解析、Publication Guard、PostgreSQL 基础迁移均已 GREEN。
 >
 > 范围：整体方案、数据模型、编排 DSL、安全基线、技术选型与实施切片。
 >
@@ -855,7 +855,7 @@ TDD Gate 0：先将上述接口固化为 OpenAPI 3.1，补充每个操作的请�
 
 关键路径：`S0 -> S1 -> S3 -> S4 -> S6 -> S10 -> S11`；编排能力从 `S2 -> S7 -> S8 -> S9 -> S10` 独立推进。
 
-S4 当前已完成 HMAC 黄金向量、签名验证、时间窗、Nonce 防重放、Servlet Filter、请求体上限和统一错误映射。剩余 credential/auth-epoch 生命周期校验、运行时启动器注册和单一 API 代理。
+S4 当前已完成 HMAC 黄金向量、签名验证、时间窗、Nonce 防重放、Servlet Filter、请求体上限、统一错误映射、Spring Boot 启动器、数据库凭证解析和 KMS 解密端口。剩余具体 KMS 适配器、应用/授权/API 生命周期校验和单一 API 代理。
 
 ## 13. 已确认默认决策
 
@@ -874,7 +874,7 @@ S4 当前已完成 HMAC 黄金向量、签名验证、时间窗、Nonce 防重�
 
 ## 14. Handoff
 
-- 当前状态：方案与默认决策已确认；Gate 0、FlowValidator、HMAC verifier/replay、HMAC Servlet Filter、Publication Guard 和 PostgreSQL 基础迁移均已通过 `mvn verify`。
-- 当前部署边界：Filter 尚未由生产 HTTP 启动器注册，ActiveCredentialResolver 仍为集成接口，因此不视为完整网关上线。
-- 下一 TDD 切片：运行时 HTTP 启动器 + 数据库/KMS credential resolver + auth-epoch 失效契约，随后补应用/授权/API 生命周期校验。
+- 当前状态：方案与默认决策已确认；Gate 0、FlowValidator、HMAC verifier/replay、Servlet Filter、Spring Boot 运行时、JDBC credential resolver、Publication Guard 和 PostgreSQL 基础迁移均已通过 `mvn verify`。
+- 当前部署边界：可执行 Boot JAR 和端到端 HTTP 链路已建立，但具体 KMS decryptor、生产数据库最小权限授予、应用/API 授权、限流和代理/编排路由尚未完成。
+- 下一 TDD 切片：具体 KMS 适配器与 staging 最小权限验证，随后补应用/授权/API 生命周期校验、pre-auth 限流和单一 API 代理。
 - 每次切片继续执行 RED -> GREEN -> Coverage -> Security/Docs checkpoint；`mvn verify` 是统一验证命令。

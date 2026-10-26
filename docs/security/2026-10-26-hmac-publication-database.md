@@ -4,11 +4,12 @@
 
 - HMAC v1 canonicalization and golden vectors.
 - HMAC Servlet Filter authentication, request-body limits, error mapping and replay ordering.
+- Spring Boot runtime registration, JDBC credential resolution and KMS decryptor boundary.
 - Publication activation guard.
-- PostgreSQL foundation migration, composite tenant keys, RLS and active-publication triggers.
+- PostgreSQL foundation and active-credential lookup migrations, composite tenant keys, RLS and active-publication triggers.
 
-This review does not claim that the Filter is registered in a production HTTP
-launcher or that the full gateway flow is complete.
+This review does not claim that a concrete KMS adapter, application/API
+authorization, rate limiting or upstream routing is complete.
 
 ## Checklist
 
@@ -19,6 +20,9 @@ launcher or that the full gateway flow is complete.
 | Input validation | PASS | AppKey, method, host/DNS labels, path percent encoding, query names/values, Content-Type and nonce have allowlist/format checks. |
 | HTTP ambiguity | PASS | Duplicate Host, Content-Length, Content-Type and HMAC headers are rejected; missing and malformed Content-Length values fail closed. |
 | Request size | PASS for 1 MiB policy | The Filter rejects declared and streamed bodies above 1 MiB before canonicalization; concurrency limits remain a gateway follow-up. |
+| Runtime registration | PASS | A Spring Boot integration test starts embedded Tomcat, posts a signed HTTP request through the registered Filter, consumes the Nonce and rejects replay. |
+| Credential lookup privilege | PASS | `auth_resolve_active_credential` is `SECURITY DEFINER`, has a fixed `search_path`, revokes `PUBLIC`, and is tested through the non-superuser `app_runtime` role with explicit `EXECUTE`. |
+| Credential lifecycle | PASS | Active and unexpired rotating credentials resolve; suspended tenant/app, revoked and expired credentials return no row. |
 | Injection | PASS | Database integration tests use prepared statements; migrations use static SQL and typed parameters. |
 | Tenant isolation | PASS | Composite foreign keys, RLS policies and cross-tenant insert/select tests pass on PostgreSQL 18.6. |
 | Publication integrity | PASS | Guard plus database trigger reject non-PROD, mismatched, revoked and reparented active publications. |
@@ -55,6 +59,13 @@ launcher or that the full gateway flow is complete.
 - **Fix:** Duplicate length headers are rejected with 400 `DUPLICATE_HEADER` before body or signature processing.
 - **Evidence:** RED `c140907`; GREEN `e17b418`.
 
+### Fixed: Filter was not registered by a runtime launcher
+
+- **Severity:** High before the fix
+- **Risk:** Component tests did not prove that Tomcat invoked the Filter or that a credential could be resolved from PostgreSQL and decrypted through the runtime boundary.
+- **Fix:** Added `platform-app`, Spring Boot Filter registration, Jedis wiring, a JDBC resolver, typed failure mapping and the executable Spring Boot JAR.
+- **Evidence:** `RuntimeHmacIntegrationTest` boots embedded Tomcat against PostgreSQL 18.6 and Redis, verifies a signed request reaches the downstream handler, and verifies replay and suspended-app rejection. RED `3e36dce`; GREEN `eaa0f08`.
+
 ### Accepted: RLS trusts `app.tenant_id`
 
 - **Severity:** Medium
@@ -79,14 +90,21 @@ launcher or that the full gateway flow is complete.
 - **Residual risk:** Each in-flight signed request can retain a body of up to 1 MiB for canonicalization and downstream replay. A large unauthenticated concurrency burst can create memory pressure.
 - **Required follow-up:** Enforce ingress body limits, pre-auth IP/connection rate limits, bounded server concurrency and route-specific lower limits. Revisit streaming hashing plus bounded spooling if maximum body sizes grow.
 
-### Open: Filter is not registered by a runtime launcher
+### Open deployment prerequisite: concrete KMS adapter and database grants
 
-- **Severity:** High before public deployment
-- **Residual risk:** Unit and Filter-chain tests prove the behavior of this component, not that a production HTTP server invokes it on every public route.
-- **Required follow-up:** Add a Spring Boot/runtime integration test that boots the app, registers the Filter, resolves a credential through the real adapter and asserts the same status/error contract end to end.
+- **Severity:** High before production startup
+- **Residual risk:** The app intentionally fails startup without a `CredentialSecretDecryptor` bean. Tests use a deterministic decryptor, not a real cloud KMS call. The production gateway DB role must also be granted `EXECUTE` on the lookup function while remaining restricted elsewhere.
+- **Required follow-up:** Implement the selected KMS adapter with authenticated encryption context/AAD, timeout/retry classification and no plaintext logging; provision and test the least-privilege database role in a staging environment.
+
+### Accepted: every authenticated request performs database and KMS work
+
+- **Severity:** Medium until capacity testing
+- **Residual risk:** The current resolver has no Secret cache. Revocation is immediate, but request latency and dependency load include PostgreSQL lookup plus KMS decryption for every valid request.
+- **Required follow-up:** Establish QPS/latency targets, add bounded load tests, then introduce a short-TTL cache only with app/credential epoch validation and an explicit maximum staleness window.
 
 ## Verdict
 
 No unresolved High finding remains in the implemented component slice. The
-unregistered production launcher is explicitly High until the runtime wiring
-slice lands; remaining Medium residuals are tracked in the TDD evidence report.
+concrete KMS adapter and production database grants remain explicit High
+deployment prerequisites; remaining Medium residuals are tracked in the TDD
+evidence report.

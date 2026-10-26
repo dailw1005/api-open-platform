@@ -108,9 +108,10 @@
 
 - **Review artifact:** `docs/security/2026-10-26-hmac-publication-database.md`
 - **High findings:** none in the implemented and tested component boundaries.
-- **Deployment blocker:** the Filter is not yet registered by a production HTTP launcher, so this is not a complete public gateway.
+- **Deployment prerequisites:** a concrete KMS decryptor and least-privilege production database grants are still required.
 - **Residual Medium items:**
-  - A production credential resolver, credential/auth-epoch invalidation and bounded Secret cache are not yet implemented.
+  - Every valid request currently performs a PostgreSQL lookup and KMS-port decryption; cache/capacity behavior is not load-tested.
+  - Application/API grant authorization, rate limiting, routing and proxy/orchestration dispatch are not implemented.
   - RLS depends on trusted `app.tenant_id` middleware.
   - usage/request/audit partition tables are not in `V1`.
 
@@ -137,7 +138,22 @@
 - **GREEN:** `mvn verify`
 - **Tests:** 86 gateway tests, including 22 Filter tests.
 - **Coverage:** line 93.38% (494/529), branch 82.17% (258/314).
-- **Known gap:** the Filter class is not yet registered by a production HTTP launcher, and the credential resolver remains an integration interface.
+- **Follow-up at that checkpoint:** runtime registration and credential resolution are covered by the next slice below.
+
+## Runtime Credential Resolution Slice
+
+- **Database RED:** `mvn -pl platform-persistence -Dtest=ActiveCredentialLookupTest test` failed because `auth_resolve_active_credential(text)` did not exist.
+- **Filter RED:** typed credential failures did not exist, so the Filter could not distinguish internal configuration failure from retryable credential-store/KMS failure.
+- **Runtime RED:** `mvn -pl platform-app -am test` failed compilation because the Spring Boot application, JDBC resolver, KMS decryptor port and encryption context did not exist.
+- **Database boundary:** `V2__active_credential_lookup.sql` adds a fixed-search-path `SECURITY DEFINER` function, revokes `PUBLIC`, accepts active/unexpired rotating credentials, and verifies active tenant/app plus credential expiry.
+- **Resolver boundary:** `JdbcActiveCredentialResolver` uses a prepared statement, validates returned metadata and auth epochs, requires at least 32 plaintext bytes, and wipes rejected plaintext.
+- **KMS boundary:** `CredentialSecretDecryptor` receives tenant/app/credential/AppKey/KMS-key context; retryable KMS failure maps to 503, deterministic decryption failure maps to 500, and absent adapters fail application startup.
+- **Runtime:** `platform-app` registers the HMAC Filter in embedded Tomcat, uses a Jedis nonce store and produces an executable Spring Boot JAR.
+- **End-to-end evidence:** `RuntimeHmacIntegrationTest` performs a signed HTTP request through Tomcat, PostgreSQL and Redis; verifies the downstream handler sees the authenticated AppKey; verifies Nonce replay returns 401; and verifies a suspended app fails before the controller.
+- **GREEN:** `mvn verify`
+- **Tests:** 17 `platform-app` tests and 3 `ActiveCredentialLookupTest` PostgreSQL tests.
+- **Coverage:** runtime line 97.56% (80/82), branch 84.38% (27/32); gateway line 93.41% (510/546), branch 81.79% (265/324).
+- **Known gap:** tests use a deterministic decryptor, not a concrete cloud KMS adapter. The production database role grant and request-level capacity also require staging validation.
 
 ## Git Checkpoints
 
@@ -148,6 +164,8 @@
 | PostgreSQL foundation | `13fb211` | `f497eb9` | `c396e55` RED, `03b3976` revoke guard, `f5e9f22` RED, `030ac3f` commit-time guard |
 | HMAC verifier/replay | `9a978c7` | `e4fd7d0` | `34db036` boundary hardening |
 | HMAC authentication filter | `25fec7b` | `fe37c4f` | `c140907` RED, `e17b418` Content-Length hardening |
+| Active credential lookup | `d286fc6` | `b22e22b` | Function, typed credential errors |
+| Runtime gateway composition | `3e36dce` | `eaa0f08` | Spring Boot, JDBC resolver, KMS port, HTTP integration |
 
 ## Final Verification
 
@@ -155,18 +173,19 @@
 - **Result:** BUILD SUCCESS
 - **Contract tests:** 13 passed
 - **Flow validator tests:** 21 passed
-- **HMAC tests:** 86 passed
+- **Gateway tests:** 88 passed
 - **Publication guard tests:** 9 passed
-- **PostgreSQL foundation tests:** 10 passed
-- **Total tests:** 139 passed, 0 failed, 0 errors, 0 skipped
-- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 93.38%/branch 82.17%; control line 100%/branch 95.00%
+- **PostgreSQL tests:** 13 passed
+- **Runtime tests:** 17 passed
+- **Total tests:** 161 passed, 0 failed, 0 errors, 0 skipped
+- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 93.41%/branch 81.79%; control line 100%/branch 95.00%; runtime line 97.56%/branch 84.38%
 
 ## Self Evaluation
 
 | Axis | Score | Evidence |
 | --- | --- | --- |
-| Accuracy | 5 | OpenAPI parses, all 139 tests pass, PostgreSQL constraints and real Redis replay behavior are exercised, and JaCoCo gates pass. |
-| Completeness | 4 | Gate 0, semantic validation, HMAC canonicalization/verification, Servlet Filter integration, replay protection, publication guard and DB foundation are complete. Runtime launcher wiring, credential lifecycle, runtime execution and usage/audit persistence remain future TDD slices. |
+| Accuracy | 5 | OpenAPI parses, all 161 tests pass, PostgreSQL constraints, Redis replay behavior and a real Tomcat HTTP path are exercised, and JaCoCo gates pass. |
+| Completeness | 4 | Gate 0, semantic validation, HMAC verification, Servlet Filter, runtime registration, JDBC credential lookup, publication guard and DB foundation are complete. Concrete KMS, authorization/rate limiting, proxy/orchestration execution and usage/audit persistence remain future TDD slices. |
 | Clarity | 4 | Contracts, test map and evidence report are linked and use stable error codes. The OpenAPI artifact is large and will benefit from generated documentation. |
 | Actionability | 5 | `mvn verify` is the single validation command. The contract map identifies the next RED targets. |
 | Conciseness | 4 | Test and contract artifacts are focused; the full OpenAPI file is large but serves as the authoritative consumer boundary. |
@@ -175,8 +194,8 @@
 
 **Highest-impact improvements:**
 
-1. Register the HMAC Filter in a real runtime app and implement the database/KMS credential resolver with epoch invalidation.
+1. Implement the concrete KMS decryptor and validate least-privilege database/Redis/KMS configuration in staging.
 2. Add application/grant/API lifecycle authorization plus pre-auth and post-auth rate limiting.
 3. Enforce DSL byte, node, depth and cumulative runtime budgets, then add usage/request/audit partition migrations.
 
-**Self-check:** The 4.4 score reflects that the requested Servlet Filter slice is verifiably complete, while runtime launcher wiring, credential lifecycle and runtime persistence features are explicitly identified.
+**Self-check:** The 4.4 score reflects that the requested runtime credential-resolution slice is verifiably complete, while concrete KMS, authorization, routing and runtime persistence features are explicitly identified.

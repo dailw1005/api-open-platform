@@ -82,16 +82,42 @@ All Filter errors use the stable JSON envelope:
 Error responses never include the Secret, provided Signature, stack traces,
 credential-store details, or internal configuration.
 
-## Deployment Gap
+## Runtime Integration
 
-The Servlet Filter contract and unit/integration boundary are implemented, but
-the Filter is not yet registered by a runtime HTTP launcher. The next slices
-must provide:
+`platform-app` is the runtime composition root. It starts Spring Boot with
+embedded Tomcat, registers `HmacAuthenticationFilter` through
+`FilterRegistrationBean`, creates the Jedis-backed nonce store and wires a
+JDBC `ActiveCredentialResolver`.
 
-- a production `ActiveCredentialResolver` backed by KMS envelope decryption,
-  bounded caching and credential/auth-epoch invalidation;
-- pre-authentication IP/connection rate limiting and bounded request
-  concurrency;
-- application, grant, credential, API publication and tenant lifecycle checks;
-- route resolution, upstream proxy/orchestration dispatch, metering and
+The resolver calls the PostgreSQL `auth_resolve_active_credential(text)`
+`SECURITY DEFINER` function. That function permits AppKey lookup without a
+pre-existing tenant session, but returns rows only when:
+
+- the credential status is `ACTIVE` or valid overlap `ROTATING`;
+- the app and tenant are `ACTIVE`;
+- `expires_at` is null or in the future.
+
+The function has a fixed safe `search_path`, is not executable by `PUBLIC`, and
+must be granted only to the gateway database role. The resolver validates
+credential metadata and auth epochs, calls the `CredentialSecretDecryptor` port,
+requires a plaintext Secret of at least 32 bytes, and wipes invalid plaintext
+before failing closed.
+
+The application intentionally fails startup when no decryptor bean is present.
+The current implementation has no Secret cache, so revocations and expiration
+take effect on the next request. A bounded cache may be added later only with
+credential/app epoch validation and a strict maximum staleness window.
+
+## Remaining Production Work
+
+- Implement and separately review the concrete KMS-backed
+  `CredentialSecretDecryptor`; the runtime currently exposes only the tested
+  integration port.
+- Provision the gateway database role with `EXECUTE` on the lookup function and
+  no unrestricted `BYPASSRLS` or broad tenant-table access.
+- Add pre-authentication IP/connection rate limiting, bounded concurrency and
+  route-specific body limits.
+- Add application grant, API publication and tenant lifecycle authorization;
+  the current resolver checks app/credential/tenant status only.
+- Add route resolution, upstream proxy/orchestration dispatch, metering and
   sanitized request logging.
