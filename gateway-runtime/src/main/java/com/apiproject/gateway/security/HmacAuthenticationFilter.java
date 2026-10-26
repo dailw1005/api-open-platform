@@ -40,6 +40,7 @@ public final class HmacAuthenticationFilter implements Filter {
     );
     private static final List<String> UNIQUE_HEADERS = List.of(
             "Host",
+            "Content-Length",
             "Content-Type",
             "X-Signature-Version",
             "X-App-Key",
