@@ -29,6 +29,8 @@ public final class HmacAuthenticationFilter implements Filter {
             HmacAuthenticationFilter.class.getName() + ".appKey";
     public static final String REQUEST_ID_ATTRIBUTE =
             HmacAuthenticationFilter.class.getName() + ".requestId";
+    public static final String AUTHORIZED_API_ATTRIBUTE =
+            HmacAuthenticationFilter.class.getName() + ".authorizedApi";
 
     private static final Pattern TIMESTAMP_PATTERN = Pattern.compile("^[0-9]{10}$");
     private static final List<String> AUTH_HEADERS = List.of(
@@ -53,12 +55,14 @@ public final class HmacAuthenticationFilter implements Filter {
     private final HmacRequestAuthenticator authenticator;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final ApiAuthorizationGate authorizationGate;
 
     public HmacAuthenticationFilter(
             ActiveCredentialResolver credentialResolver,
             HmacRequestAuthenticator authenticator,
             ObjectMapper objectMapper,
-            Clock clock
+            Clock clock,
+            ApiAuthorizationGate authorizationGate
     ) {
         this.credentialResolver = Objects.requireNonNull(
                 credentialResolver,
@@ -67,6 +71,10 @@ public final class HmacAuthenticationFilter implements Filter {
         this.authenticator = Objects.requireNonNull(authenticator, "authenticator");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.authorizationGate = Objects.requireNonNull(
+                authorizationGate,
+                "authorizationGate"
+        );
     }
 
     @Override
@@ -98,6 +106,18 @@ public final class HmacAuthenticationFilter implements Filter {
         HttpServletRequest authenticatedRequest;
         try {
             authenticatedRequest = authenticate(request, requestId);
+            String appKey = (String) authenticatedRequest.getAttribute(
+                    AUTHENTICATED_APP_KEY_ATTRIBUTE
+            );
+            AuthorizedApi authorizedApi = authorizationGate.authorize(
+                    appKey,
+                    request.getMethod(),
+                    request.getRequestURI()
+            );
+            authenticatedRequest.setAttribute(
+                    AUTHORIZED_API_ATTRIBUTE,
+                    authorizedApi
+            );
         } catch (FilterException exception) {
             writeError(
                     response,
@@ -105,6 +125,16 @@ public final class HmacAuthenticationFilter implements Filter {
                     exception.status,
                     exception.code,
                     exception.retryable
+            );
+            return;
+        } catch (ApiAuthorizationException exception) {
+            ErrorMapping mapping = mapAuthorizationError(exception.code());
+            writeError(
+                    response,
+                    requestId,
+                    mapping.status,
+                    exception.code(),
+                    mapping.retryable
             );
             return;
         } catch (HmacVerificationException exception) {
@@ -323,6 +353,16 @@ public final class HmacAuthenticationFilter implements Filter {
         };
     }
 
+    private ErrorMapping mapAuthorizationError(String code) {
+        return switch (code) {
+            case "INVALID_CREDENTIAL" -> new ErrorMapping(401, false);
+            case "API_NOT_GRANTED" -> new ErrorMapping(403, false);
+            case "API_NOT_FOUND" -> new ErrorMapping(404, false);
+            case "AUTHORIZATION_STORE_UNAVAILABLE" -> new ErrorMapping(503, true);
+            default -> new ErrorMapping(500, false);
+        };
+    }
+
     private void writeError(
             HttpServletResponse response,
             String requestId,
@@ -363,6 +403,10 @@ public final class HmacAuthenticationFilter implements Filter {
             case "INVALID_REQUEST" -> "Request is invalid";
             case "INTERNAL_CONFIGURATION" -> "Authentication configuration is invalid";
             case "REQUEST_READ_FAILED" -> "Request body could not be read";
+            case "API_NOT_FOUND" -> "API was not found";
+            case "API_NOT_GRANTED" -> "Application is not granted this API";
+            case "AUTHORIZATION_STORE_UNAVAILABLE" ->
+                    "Authorization service is unavailable";
             default -> "Authentication failed";
         };
     }

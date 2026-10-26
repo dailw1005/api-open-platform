@@ -21,6 +21,11 @@ public final class GatewayDatabaseRoleVerifier {
                     'public.auth_resolve_active_credential(text)',
                     'EXECUTE'
                 ),
+                has_function_privilege(
+                    current_user,
+                    'public.auth_authorize_public_api(text,text,text)',
+                    'EXECUTE'
+                ),
                 has_table_privilege(
                     current_user,
                     'public.app_credential',
@@ -47,8 +52,9 @@ public final class GatewayDatabaseRoleVerifier {
             String roleName = resultSet.getString(1);
             boolean superuser = resultSet.getBoolean(2);
             boolean bypassRls = resultSet.getBoolean(3);
-            boolean functionExecute = resultSet.getBoolean(4);
-            boolean directCredentialAccess = resultSet.getBoolean(5);
+            boolean credentialFunctionExecute = resultSet.getBoolean(4);
+            boolean authorizationFunctionExecute = resultSet.getBoolean(5);
+            boolean directCredentialAccess = resultSet.getBoolean(6);
 
             if (superuser) {
                 throw configurationError(
@@ -60,9 +66,14 @@ public final class GatewayDatabaseRoleVerifier {
                         "Gateway database role must not have BYPASSRLS"
                 );
             }
-            if (!functionExecute) {
+            if (!credentialFunctionExecute) {
                 throw configurationError(
                         "Gateway database role lacks credential lookup EXECUTE"
+                );
+            }
+            if (!authorizationFunctionExecute) {
+                throw configurationError(
+                        "Gateway database role lacks authorization EXECUTE"
                 );
             }
             if (directCredentialAccess) {
@@ -72,7 +83,8 @@ public final class GatewayDatabaseRoleVerifier {
             }
             return new GatewayDatabaseRoleStatus(
                     roleName,
-                    functionExecute,
+                    credentialFunctionExecute,
+                    authorizationFunctionExecute,
                     superuser,
                     bypassRls,
                     directCredentialAccess

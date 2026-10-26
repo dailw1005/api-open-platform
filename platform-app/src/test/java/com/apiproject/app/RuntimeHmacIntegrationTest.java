@@ -49,6 +49,16 @@ class RuntimeHmacIntegrationTest {
     private static final byte[] SECRET = bytes(
             "runtime-secret-0123456789abcdef0123456789abcdef"
     );
+    private static final UUID PROBE_API_ID =
+            UUID.fromString("10000000-0000-0000-0000-000000000001");
+    private static final UUID PROBE_VERSION_ID =
+            UUID.fromString("10000000-0000-0000-0000-000000000002");
+    private static final UUID PROBE_PUBLICATION_ID =
+            UUID.fromString("10000000-0000-0000-0000-000000000003");
+    private static final UUID PROBE_OWNER_TENANT_ID =
+            UUID.fromString("10000000-0000-0000-0000-000000000004");
+    private static final UUID PROBE_OWNER_USER_ID =
+            UUID.fromString("10000000-0000-0000-0000-000000000005");
     private static final EmbeddedPostgres POSTGRES = startPostgres();
     private static final DataSource ADMIN_DATA_SOURCE = POSTGRES.getPostgresDatabase();
     private static final JdbcTemplate ADMIN_JDBC = new JdbcTemplate(ADMIN_DATA_SOURCE);
@@ -88,6 +98,7 @@ class RuntimeHmacIntegrationTest {
     void signedRequestPassesThroughRegisteredFilterAndReplayIsRejected()
             throws Exception {
         String appKey = insertCredential("ACTIVE", "ACTIVE");
+        grantProbeApi(appKey);
         String nonce = "nonce-" + UUID.randomUUID();
         String host = "127.0.0.1:" + serverPort;
         long timestamp = NOW.getEpochSecond();
@@ -139,6 +150,28 @@ class RuntimeHmacIntegrationTest {
 
         assertEquals(401, response.statusCode());
         assertTrue(response.body().contains("INVALID_CREDENTIAL"));
+    }
+
+    @Test
+    void activeAppWithoutGrantReturns403() throws Exception {
+        String appKey = insertCredential("ACTIVE", "ACTIVE");
+        ensureProbeApi();
+        String nonce = "nonce-" + UUID.randomUUID();
+        long timestamp = NOW.getEpochSecond();
+        String host = "127.0.0.1:" + serverPort;
+
+        HttpResponse<String> response = httpClient.send(
+                request(
+                        appKey,
+                        timestamp,
+                        nonce,
+                        signature(appKey, host, timestamp, nonce)
+                ),
+                HttpResponse.BodyHandlers.ofString()
+        );
+
+        assertEquals(403, response.statusCode());
+        assertTrue(response.body().contains("API_NOT_GRANTED"));
     }
 
     private HttpRequest request(
@@ -272,7 +305,113 @@ class RuntimeHmacIntegrationTest {
                 ON FUNCTION auth_resolve_active_credential(text)
                 TO gateway_staging
                 """);
+        ADMIN_JDBC.execute("""
+                GRANT EXECUTE
+                ON FUNCTION auth_authorize_public_api(text,text,text)
+                TO gateway_staging
+                """);
         return true;
+    }
+
+    private void grantProbeApi(String appKey) {
+        ensureProbeApi();
+        ADMIN_JDBC.update(
+                """
+                INSERT INTO app_api_grant (
+                    tenant_id, app_id, api_id, granted_by, status, auth_epoch
+                )
+                SELECT tenant_id, app_id, ?, ?, 'ACTIVE', 1
+                FROM app_credential
+                WHERE app_key = ?
+                """,
+                PROBE_API_ID,
+                PROBE_OWNER_USER_ID,
+                appKey
+        );
+    }
+
+    private void ensureProbeApi() {
+        Integer count = ADMIN_JDBC.queryForObject(
+                "SELECT count(*) FROM api_definition WHERE id = ?",
+                Integer.class,
+                PROBE_API_ID
+        );
+        if (count != null && count > 0) {
+            return;
+        }
+
+        ADMIN_JDBC.update(
+                """
+                INSERT INTO iam_tenant (id, code, name, status, auth_epoch)
+                VALUES (?, 'probe-owner', 'Probe Owner', 'ACTIVE', 1)
+                """,
+                PROBE_OWNER_TENANT_ID
+        );
+        ADMIN_JDBC.update(
+                """
+                INSERT INTO iam_user (
+                    id, email, password_hash, mfa_enabled, status
+                ) VALUES (
+                    ?, 'probe-owner@example.com', 'argon2-test-hash', false, 'ACTIVE'
+                )
+                """,
+                PROBE_OWNER_USER_ID
+        );
+        ADMIN_JDBC.update(
+                """
+                INSERT INTO api_definition (
+                    id, owner_tenant_id, code, name, public_method, public_path,
+                    kind, visibility, status, publish_epoch
+                ) VALUES (
+                    ?, ?, 'runtime-probe', 'Runtime Probe', 'GET', '/open/v1/probe',
+                    'PROXY', 'PLATFORM_PUBLIC', 'PUBLISHED', 1
+                )
+                """,
+                PROBE_API_ID,
+                PROBE_OWNER_TENANT_ID
+        );
+        ADMIN_JDBC.update(
+                """
+                INSERT INTO api_version (
+                    id, api_id, version, status, request_schema, response_schema,
+                    timeout_ms, config_json, config_checksum, created_by
+                ) VALUES (
+                    ?, ?, 1, 'PUBLISHED', '{"type":"object"}'::jsonb,
+                    '{"type":"object"}'::jsonb, 1000,
+                    '{"upstreamEndpointId":"00000000-0000-0000-0000-000000000001"}'::jsonb,
+                    repeat('a', 64), ?
+                )
+                """,
+                PROBE_VERSION_ID,
+                PROBE_API_ID,
+                PROBE_OWNER_USER_ID
+        );
+        ADMIN_JDBC.update(
+                """
+                INSERT INTO api_publication (
+                    id, api_id, owner_tenant_id, visibility, api_version_id,
+                    environment, publication_no, status, manifest_json,
+                    manifest_checksum, published_by
+                ) VALUES (
+                    ?, ?, ?, 'PLATFORM_PUBLIC', ?, 'PROD', 1, 'ACTIVE',
+                    '{"requiredApis":[]}'::jsonb, repeat('b', 64), ?
+                )
+                """,
+                PROBE_PUBLICATION_ID,
+                PROBE_API_ID,
+                PROBE_OWNER_TENANT_ID,
+                PROBE_VERSION_ID,
+                PROBE_OWNER_USER_ID
+        );
+        ADMIN_JDBC.update(
+                """
+                UPDATE api_definition
+                SET active_prod_publication_id = ?, publish_epoch = publish_epoch + 1
+                WHERE id = ?
+                """,
+                PROBE_PUBLICATION_ID,
+                PROBE_API_ID
+        );
     }
 
     private static RedisServer startRedis(int port) {

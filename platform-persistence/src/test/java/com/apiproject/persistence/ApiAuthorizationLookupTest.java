@@ -54,7 +54,7 @@ class ApiAuthorizationLookupTest {
         Decision decision = authorize(
                 fixture.appKey(),
                 "GET",
-                "/open/v1/orders"
+                fixture.path()
         );
 
         assertEquals("ALLOWED", decision.code());
@@ -70,11 +70,11 @@ class ApiAuthorizationLookupTest {
 
         assertEquals(
                 "API_NOT_GRANTED",
-                authorize(missing.appKey(), "GET", "/open/v1/orders").code()
+                authorize(missing.appKey(), "GET", missing.path()).code()
         );
         assertEquals(
                 "API_NOT_GRANTED",
-                authorize(revoked.appKey(), "GET", "/open/v1/orders").code()
+                authorize(revoked.appKey(), "GET", revoked.path()).code()
         );
     }
 
@@ -84,11 +84,15 @@ class ApiAuthorizationLookupTest {
 
         assertEquals(
                 "API_NOT_FOUND",
-                authorize(fixture.appKey(), "POST", "/open/v1/orders").code()
+                authorize(fixture.appKey(), "POST", fixture.path()).code()
         );
         assertEquals(
                 "API_NOT_FOUND",
-                authorize(fixture.appKey(), "GET", "/open/v1/unknown").code()
+                authorize(
+                        fixture.appKey(),
+                        "GET",
+                        fixture.path() + "-unknown"
+                ).code()
         );
     }
 
@@ -112,14 +116,18 @@ class ApiAuthorizationLookupTest {
 
         assertEquals(
                 "API_NOT_FOUND",
-                authorize(foreignPrivate.appKey(), "GET", "/open/v1/private").code()
+                authorize(
+                        foreignPrivate.appKey(),
+                        "GET",
+                        foreignPrivate.path()
+                ).code()
         );
         assertEquals(
                 "INVALID_CREDENTIAL",
                 authorize(
                         invalidCredential.appKey(),
                         "GET",
-                        "/open/v1/orders"
+                        invalidCredential.path()
                 ).code()
         );
     }
@@ -174,7 +182,8 @@ class ApiAuthorizationLookupTest {
         return new Fixture(
                 caller.appKey(),
                 foreignApi.apiId(),
-                foreignApi.apiVersionId()
+                foreignApi.apiVersionId(),
+                foreignApi.path()
         );
     }
 
@@ -208,7 +217,10 @@ class ApiAuthorizationLookupTest {
                     owner.tenantId(),
                     owner.userId(),
                     apiId,
-                    visibility
+                    visibility,
+                    "TENANT_PRIVATE".equals(visibility)
+                            ? "/open/v1/private/" + apiId
+                            : "/open/v1/orders/" + apiId
             );
             insertApiVersion(connection, apiId, owner.userId(), versionId);
             insertPublication(
@@ -224,7 +236,14 @@ class ApiAuthorizationLookupTest {
                 insertGrant(connection, owner, apiId, grantStatus);
             }
         }
-        return new Fixture(owner.appKey(), apiId, versionId);
+        return new Fixture(
+                owner.appKey(),
+                apiId,
+                versionId,
+                "TENANT_PRIVATE".equals(visibility)
+                        ? "/open/v1/private/" + apiId
+                        : "/open/v1/orders/" + apiId
+        );
     }
 
     private static void insertGrant(
@@ -350,7 +369,8 @@ class ApiAuthorizationLookupTest {
             UUID tenantId,
             UUID userId,
             UUID apiId,
-            String visibility
+            String visibility,
+            String publicPath
     ) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 INSERT INTO api_definition (
@@ -363,12 +383,7 @@ class ApiAuthorizationLookupTest {
             statement.setObject(2, tenantId);
             statement.setString(3, "authz-api-" + suffix);
             statement.setString(4, "Authz API " + suffix);
-            statement.setString(
-                    5,
-                    "TENANT_PRIVATE".equals(visibility)
-                            ? "/open/v1/private"
-                            : "/open/v1/orders"
-            );
+            statement.setString(5, publicPath);
             statement.setString(6, visibility);
             statement.executeUpdate();
         }
@@ -473,7 +488,8 @@ class ApiAuthorizationLookupTest {
     private record Fixture(
             String appKey,
             UUID apiId,
-            UUID apiVersionId
+            UUID apiVersionId,
+            String path
     ) {
     }
 

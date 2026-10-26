@@ -52,7 +52,8 @@ class GatewayDatabaseRoleVerifierTest {
 
         GatewayDatabaseRoleStatus status = assertDoesNotThrow(verifier::verify);
         assertEquals("gateway_least_privilege", status.roleName());
-        assertTrue(status.functionExecute());
+        assertTrue(status.credentialFunctionExecute());
+        assertTrue(status.authorizationFunctionExecute());
     }
 
     @Test
@@ -150,6 +151,11 @@ class GatewayDatabaseRoleVerifierTest {
             statement.execute("GRANT USAGE ON SCHEMA public TO " + roleName);
             statement.execute(
                     "GRANT EXECUTE ON FUNCTION auth_resolve_active_credential(text) "
+                            + "TO " + roleName
+            );
+            statement.execute(
+                    "GRANT EXECUTE ON FUNCTION "
+                            + "auth_authorize_public_api(text,text,text) "
                             + "TO " + roleName
             );
         }

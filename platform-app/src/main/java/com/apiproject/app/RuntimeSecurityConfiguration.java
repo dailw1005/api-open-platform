@@ -2,8 +2,10 @@ package com.apiproject.app;
 
 import com.apiproject.app.security.CredentialSecretDecryptor;
 import com.apiproject.app.security.GatewayDatabaseRoleVerifier;
+import com.apiproject.app.security.JdbcApiAuthorizationGate;
 import com.apiproject.app.security.JdbcActiveCredentialResolver;
 import com.apiproject.gateway.security.ActiveCredentialResolver;
+import com.apiproject.gateway.security.ApiAuthorizationGate;
 import com.apiproject.gateway.security.HmacAuthenticationFilter;
 import com.apiproject.gateway.security.HmacRequestAuthenticator;
 import com.apiproject.gateway.security.HmacVerifier;
@@ -55,6 +57,11 @@ public class RuntimeSecurityConfiguration {
     }
 
     @Bean
+    ApiAuthorizationGate apiAuthorizationGate(DataSource dataSource) {
+        return new JdbcApiAuthorizationGate(dataSource);
+    }
+
+    @Bean
     GatewayDatabaseRoleVerifier gatewayDatabaseRoleVerifier(DataSource dataSource) {
         return new GatewayDatabaseRoleVerifier(dataSource);
     }
@@ -83,7 +90,8 @@ public class RuntimeSecurityConfiguration {
             ActiveCredentialResolver credentialResolver,
             HmacRequestAuthenticator authenticator,
             ObjectMapper objectMapper,
-            Clock clock
+            Clock clock,
+            ApiAuthorizationGate authorizationGate
     ) {
         FilterRegistrationBean<HmacAuthenticationFilter> registration =
                 new FilterRegistrationBean<>();
@@ -92,7 +100,8 @@ public class RuntimeSecurityConfiguration {
                 credentialResolver,
                 authenticator,
                 objectMapper,
-                clock
+                clock,
+                authorizationGate
         ));
         registration.addUrlPatterns("/*");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 20);
