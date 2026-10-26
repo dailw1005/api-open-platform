@@ -40,7 +40,7 @@ class NonceReplayGuardTest {
         guard.assertUnused(APP_KEY, NONCE);
 
         assertTrue(store.lastKey.startsWith("apip:auth:nonce:v1:"));
-        assertEquals(22 + 64, store.lastKey.length());
+        assertEquals(19 + 64, store.lastKey.length());
         assertFalse(store.lastKey.contains(APP_KEY));
         assertFalse(store.lastKey.contains(NONCE));
         assertEquals(Duration.ofSeconds(660), store.lastTtl);
