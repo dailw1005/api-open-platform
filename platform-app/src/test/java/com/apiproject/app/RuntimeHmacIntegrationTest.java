@@ -8,7 +8,7 @@ import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.flywaydb.core.Flyway;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import redis.embedded.RedisServer;
 
+import javax.sql.DataSource;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -49,6 +50,9 @@ class RuntimeHmacIntegrationTest {
             "runtime-secret-0123456789abcdef0123456789abcdef"
     );
     private static final EmbeddedPostgres POSTGRES = startPostgres();
+    private static final DataSource ADMIN_DATA_SOURCE = POSTGRES.getPostgresDatabase();
+    private static final JdbcTemplate ADMIN_JDBC = new JdbcTemplate(ADMIN_DATA_SOURCE);
+    private static final boolean ADMIN_SCHEMA_READY = prepareRestrictedRole();
     private static final int REDIS_PORT = freePort();
     private static final RedisServer REDIS = startRedis(REDIS_PORT);
 
@@ -58,21 +62,20 @@ class RuntimeHmacIntegrationTest {
     @LocalServerPort
     private int serverPort;
 
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
-
     @DynamicPropertySource
     static void runtimeProperties(DynamicPropertyRegistry registry) {
         registry.add(
                 "spring.datasource.url",
                 () -> POSTGRES.getJdbcUrl("postgres", "postgres")
         );
-        registry.add("spring.datasource.username", () -> "postgres");
-        registry.add("spring.datasource.password", () -> "postgres");
+        registry.add("spring.datasource.username", () -> "gateway_staging");
+        registry.add("spring.datasource.password", () -> "test-password");
+        registry.add("spring.flyway.enabled", () -> "false");
         registry.add(
                 "gateway.security.redis-uri",
                 () -> "redis://127.0.0.1:" + REDIS_PORT
         );
+        registry.add("gateway.security.kms.enabled", () -> "false");
     }
 
     @AfterAll
@@ -185,7 +188,7 @@ class RuntimeHmacIntegrationTest {
         String appKey = "ak_runtime_" + suffix + "_1234567890";
         String tenantCode = "runtime-" + suffix;
 
-        jdbcTemplate.update(
+        ADMIN_JDBC.update(
                 """
                 INSERT INTO iam_tenant (id, code, name, status, auth_epoch)
                 VALUES (?, ?, ?, 'ACTIVE', 1)
@@ -194,7 +197,7 @@ class RuntimeHmacIntegrationTest {
                 tenantCode,
                 tenantCode
         );
-        jdbcTemplate.update(
+        ADMIN_JDBC.update(
                 """
                 INSERT INTO iam_user (id, email, password_hash, mfa_enabled, status)
                 VALUES (?, ?, 'argon2-test-hash', false, 'ACTIVE')
@@ -202,7 +205,7 @@ class RuntimeHmacIntegrationTest {
                 userId,
                 "runtime-" + suffix + "@example.com"
         );
-        jdbcTemplate.update(
+        ADMIN_JDBC.update(
                 """
                 INSERT INTO iam_role_binding (
                     tenant_id, user_id, role_code, scope_type
@@ -211,7 +214,7 @@ class RuntimeHmacIntegrationTest {
                 tenantId,
                 userId
         );
-        jdbcTemplate.update(
+        ADMIN_JDBC.update(
                 """
                 INSERT INTO app (
                     id, tenant_id, name, owner_user_id, status, auth_epoch
@@ -223,7 +226,7 @@ class RuntimeHmacIntegrationTest {
                 userId,
                 appStatus
         );
-        jdbcTemplate.update(
+        ADMIN_JDBC.update(
                 """
                 INSERT INTO app_credential (
                     id, tenant_id, app_id, app_key, secret_ciphertext, kms_key_id,
@@ -246,6 +249,30 @@ class RuntimeHmacIntegrationTest {
         } catch (Exception exception) {
             throw new ExceptionInInitializerError(exception);
         }
+    }
+
+    private static boolean prepareRestrictedRole() {
+        Flyway.configure()
+                .dataSource(ADMIN_DATA_SOURCE)
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+        ADMIN_JDBC.execute("DROP ROLE IF EXISTS gateway_staging");
+        ADMIN_JDBC.execute("""
+                CREATE ROLE gateway_staging
+                LOGIN PASSWORD 'test-password'
+                NOSUPERUSER NOBYPASSRLS
+                """);
+        ADMIN_JDBC.execute(
+                "GRANT CONNECT ON DATABASE postgres TO gateway_staging"
+        );
+        ADMIN_JDBC.execute("GRANT USAGE ON SCHEMA public TO gateway_staging");
+        ADMIN_JDBC.execute("""
+                GRANT EXECUTE
+                ON FUNCTION auth_resolve_active_credential(text)
+                TO gateway_staging
+                """);
+        return true;
     }
 
     private static RedisServer startRedis(int port) {

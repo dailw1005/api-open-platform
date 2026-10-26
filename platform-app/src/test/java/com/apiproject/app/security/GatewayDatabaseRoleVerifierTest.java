@@ -1,0 +1,120 @@
+package com.apiproject.app.security;
+
+import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
+import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.postgresql.ds.PGSimpleDataSource;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class GatewayDatabaseRoleVerifierTest {
+
+    private static EmbeddedPostgres postgres;
+    private static DataSource adminDataSource;
+    private static String jdbcUrl;
+
+    @BeforeAll
+    static void migrateDatabase() throws Exception {
+        postgres = EmbeddedPostgres.builder().start();
+        adminDataSource = postgres.getPostgresDatabase();
+        jdbcUrl = postgres.getJdbcUrl("postgres", "postgres");
+        Flyway.configure()
+                .dataSource(adminDataSource)
+                .locations("classpath:db/migration")
+                .load()
+                .migrate();
+    }
+
+    @AfterAll
+    static void closeDatabase() throws Exception {
+        if (postgres != null) {
+            postgres.close();
+        }
+    }
+
+    @Test
+    void acceptsLeastPrivilegeGatewayRole() throws Exception {
+        createRole("gateway_least_privilege", "LOGIN PASSWORD 'test-password'");
+        grantFunctionOnly("gateway_least_privilege");
+
+        GatewayDatabaseRoleVerifier verifier = verifierFor("gateway_least_privilege");
+
+        GatewayDatabaseRoleStatus status = assertDoesNotThrow(verifier::verify);
+        assertEquals("gateway_least_privilege", status.roleName());
+        assertTrue(status.functionExecute());
+    }
+
+    @Test
+    void rejectsGatewayRoleWithDirectCredentialTableAccess() throws Exception {
+        createRole("gateway_table_access", "LOGIN PASSWORD 'test-password'");
+        grantFunctionOnly("gateway_table_access");
+        try (Connection connection = adminDataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute(
+                    "GRANT SELECT ON app_credential TO gateway_table_access"
+            );
+        }
+
+        GatewayDatabaseRoleVerifier verifier = verifierFor("gateway_table_access");
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                verifier::verify
+        );
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+        assertTrue(exception.getMessage().contains("sensitive table privileges"));
+    }
+
+    @Test
+    void rejectsSuperuserGatewayRole() throws Exception {
+        createRole("gateway_superuser", "LOGIN SUPERUSER PASSWORD 'test-password'");
+
+        GatewayDatabaseRoleVerifier verifier = verifierFor("gateway_superuser");
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                verifier::verify
+        );
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+        assertTrue(exception.getMessage().contains("superuser"));
+    }
+
+    private static void createRole(String roleName, String attributes)
+            throws SQLException {
+        try (Connection connection = adminDataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("DROP ROLE IF EXISTS " + roleName);
+            statement.execute("CREATE ROLE " + roleName + " " + attributes);
+        }
+    }
+
+    private static void grantFunctionOnly(String roleName) throws SQLException {
+        try (Connection connection = adminDataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("GRANT CONNECT ON DATABASE postgres TO " + roleName);
+            statement.execute("GRANT USAGE ON SCHEMA public TO " + roleName);
+            statement.execute(
+                    "GRANT EXECUTE ON FUNCTION auth_resolve_active_credential(text) "
+                            + "TO " + roleName
+            );
+        }
+    }
+
+    private static GatewayDatabaseRoleVerifier verifierFor(String userName) {
+        PGSimpleDataSource dataSource = new PGSimpleDataSource();
+        dataSource.setUrl(jdbcUrl);
+        dataSource.setUser(userName);
+        dataSource.setPassword("test-password");
+        return new GatewayDatabaseRoleVerifier(dataSource);
+    }
+}
