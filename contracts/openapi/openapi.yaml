@@ -2204,6 +2204,10 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "413":
+          $ref: "#/components/responses/RequestTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
         "502":
           $ref: "#/components/responses/BadGateway"
         "503":
@@ -2253,6 +2257,10 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "413":
+          $ref: "#/components/responses/RequestTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
         "502":
           $ref: "#/components/responses/BadGateway"
         "503":
@@ -2302,6 +2310,10 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "413":
+          $ref: "#/components/responses/RequestTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
         "502":
           $ref: "#/components/responses/BadGateway"
         "503":
@@ -2351,6 +2363,10 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "413":
+          $ref: "#/components/responses/RequestTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
         "502":
           $ref: "#/components/responses/BadGateway"
         "503":
@@ -2388,6 +2404,10 @@ paths:
           $ref: "#/components/responses/UnprocessableEntity"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "413":
+          $ref: "#/components/responses/RequestTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
         "502":
           $ref: "#/components/responses/BadGateway"
         "503":
@@ -2680,6 +2700,15 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    RequestTooLarge:
+      description: Request body or framing exceeds the configured limit
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
     Unauthorized:
       description: Authentication failed
       content:
@@ -2729,6 +2758,15 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
     BadGateway:
       description: Upstream returned an unusable response
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Internal platform failure
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/RequestId"
       content:
         application/json:
           schema:

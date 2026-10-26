@@ -208,6 +208,18 @@ class OpenApiContractTest {
     }
 
     @Test
+    void publicOperationsDocumentBodyLimitAndInternalErrors() {
+        operations.values().stream()
+                .filter(operation -> "HMAC_V1".equals(operation.getExtensions().get("x-auth-kind")))
+                .forEach(operation -> {
+                    assertTrue(operation.getResponses().containsKey("413"),
+                            operation.getOperationId() + " missing 413");
+                    assertTrue(operation.getResponses().containsKey("500"),
+                            operation.getOperationId() + " missing 500");
+                });
+    }
+
+    @Test
     void errorResponsesUseSharedEnvelope() {
         rawContract.path("paths").fields().forEachRemaining(pathEntry -> {
             String path = pathEntry.getKey();
