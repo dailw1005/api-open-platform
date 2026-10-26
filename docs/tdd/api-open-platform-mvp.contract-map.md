@@ -34,6 +34,18 @@ The plan is treated as approved intent, not as executable instructions. Only rep
 | Tenant isolation | Plan section 5 | Repository integration tests | Cross-tenant lookup returns data | RLS and composite FK tests pass |
 | Metering per dispatch | Plan section 6.3 | `UsageRecordingTest` | Two nodes create one record | Two idempotent records created |
 
+## Current Progress
+
+| Slice | Status | Evidence |
+| --- | --- | --- |
+| Gate 0 OpenAPI and DSL | PASS | 12 contract tests |
+| Flow semantic validation | PASS | 21 tests, line 92.98%, branch 82.81% |
+| HMAC v1 canonicalizer | PASS | 47 tests, line 96.99%, branch 83.64% |
+| Publication guard | PASS | 9 tests, line 100%, branch 95.00% |
+| PostgreSQL foundation | PASS | 10 embedded PostgreSQL integration tests |
+| Gateway verifier and nonce replay | NEXT | Not implemented |
+| Usage/audit partition migration | NEXT | Not implemented |
+
 ## Gate 0 Test Specification
 
 | # | Guarantee | Test | Type | Expected |

@@ -1,6 +1,6 @@
 # API 开放平台 MVP 整体方案与实施蓝图
 
-> 状态：Approved；Gate 0 已验收，FlowValidator 首个 TDD 切片已 GREEN。  
+> 状态：Approved；Gate 0、FlowValidator、HMAC v1、Publication Guard、PostgreSQL 基础迁移均已 GREEN。  
 > 范围：整体方案、数据模型、编排 DSL、安全基线、技术选型与实施切片。  
 > 约束：本阶段不编写业务代码。
 > 仓储前提：当前目录尚不是 Git 仓库；方案确认后由 S0 显式初始化，Blueprint 以 direct mode 执行，不自动创建分支或提交。
