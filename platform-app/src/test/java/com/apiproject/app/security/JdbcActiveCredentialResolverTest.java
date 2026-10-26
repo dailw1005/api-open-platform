@@ -3,6 +3,7 @@ package com.apiproject.app.security;
 import com.apiproject.gateway.security.CredentialResolutionException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class JdbcActiveCredentialResolverTest {
@@ -62,6 +64,14 @@ class JdbcActiveCredentialResolverTest {
 
         assertTrue(resolved.isPresent());
         assertArrayEquals(SECRET, resolved.orElseThrow());
+        ArgumentCaptor<CredentialEncryptionContext> context =
+                ArgumentCaptor.forClass(CredentialEncryptionContext.class);
+        verify(decryptor).decrypt(context.capture(), any(byte[].class));
+        assertEquals(CREDENTIAL_ID, context.getValue().credentialId());
+        assertEquals(TENANT_ID, context.getValue().tenantId());
+        assertEquals(APP_ID, context.getValue().appId());
+        assertEquals(APP_KEY, context.getValue().appKey());
+        assertEquals("test-kms-key", context.getValue().kmsKeyId());
     }
 
     @Test
@@ -76,6 +86,19 @@ class JdbcActiveCredentialResolverTest {
     @Test
     void databaseFailureIsTypedAsRetryableStoreUnavailable() throws Exception {
         when(dataSource.getConnection()).thenThrow(new SQLException("database down"));
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver.resolveActiveSecret(APP_KEY)
+        );
+
+        assertEquals("CREDENTIAL_STORE_UNAVAILABLE", exception.code());
+        assertTrue(exception.retryable());
+    }
+
+    @Test
+    void queryFailureIsTypedAsRetryableStoreUnavailable() throws Exception {
+        when(statement.executeQuery()).thenThrow(new SQLException("query failed"));
 
         CredentialResolutionException exception = assertThrows(
                 CredentialResolutionException.class,
@@ -138,6 +161,113 @@ class JdbcActiveCredentialResolverTest {
 
         assertEquals("INTERNAL_CONFIGURATION", exception.code());
         assertArrayEquals(new byte[31], invalidSecret);
+    }
+
+    @Test
+    void nullPlaintextFailsClosed() throws Exception {
+        stubActiveRow();
+        when(decryptor.decrypt(any(CredentialEncryptionContext.class), any(byte[].class)))
+                .thenReturn(null);
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver.resolveActiveSecret(APP_KEY)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void unexpectedDecryptorRuntimeFailureFailsClosed() throws Exception {
+        stubActiveRow();
+        when(decryptor.decrypt(any(CredentialEncryptionContext.class), any(byte[].class)))
+                .thenThrow(new IllegalArgumentException("bad ciphertext"));
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver.resolveActiveSecret(APP_KEY)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+        assertFalse(exception.getMessage().contains("bad ciphertext"));
+    }
+
+    @Test
+    void multipleRowsFailClosed() throws Exception {
+        stubActiveRow();
+        when(resultSet.next()).thenReturn(true, true);
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver.resolveActiveSecret(APP_KEY)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void nullMetadataFailsClosed() throws Exception {
+        stubActiveRow();
+        when(resultSet.getObject("credential_id", UUID.class)).thenReturn(null);
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver.resolveActiveSecret(APP_KEY)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void nullTenantMetadataFailsClosed() throws Exception {
+        stubActiveRow();
+        when(resultSet.getObject("tenant_id", UUID.class)).thenReturn(null);
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver.resolveActiveSecret(APP_KEY)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void nullAppMetadataFailsClosed() throws Exception {
+        stubActiveRow();
+        when(resultSet.getObject("app_id", UUID.class)).thenReturn(null);
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver.resolveActiveSecret(APP_KEY)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void invalidAppEpochFailsClosed() throws Exception {
+        stubActiveRow();
+        when(resultSet.getLong("app_auth_epoch")).thenReturn(0L);
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver.resolveActiveSecret(APP_KEY)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void invalidCredentialEpochFailsClosed() throws Exception {
+        stubActiveRow();
+        when(resultSet.getLong("credential_auth_epoch")).thenReturn(-1L);
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                () -> resolver.resolveActiveSecret(APP_KEY)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
     }
 
     private void stubActiveRow() throws SQLException {

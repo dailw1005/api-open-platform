@@ -1,8 +1,11 @@
 package com.apiproject.app;
 
+import com.apiproject.app.security.CredentialSecretDecryptor;
 import com.apiproject.gateway.security.HmacCanonicalRequest;
 import com.apiproject.gateway.security.HmacCanonicalizer;
+import com.apiproject.gateway.security.HmacAuthenticationFilter;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
+import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,9 +13,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
 import redis.embedded.RedisServer;
 
 import java.net.ServerSocket;
@@ -43,8 +49,8 @@ class RuntimeHmacIntegrationTest {
             "runtime-secret-0123456789abcdef0123456789abcdef"
     );
     private static final EmbeddedPostgres POSTGRES = startPostgres();
-    private static final RedisServer REDIS = startRedis();
-    private static final int REDIS_PORT = REDIS.ports().iterator().next();
+    private static final int REDIS_PORT = freePort();
+    private static final RedisServer REDIS = startRedis(REDIS_PORT);
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final HmacCanonicalizer canonicalizer = HmacCanonicalizer.createDefault();
@@ -242,12 +248,8 @@ class RuntimeHmacIntegrationTest {
         }
     }
 
-    private static RedisServer startRedis() {
+    private static RedisServer startRedis(int port) {
         try {
-            int port;
-            try (ServerSocket socket = new ServerSocket(0)) {
-                port = socket.getLocalPort();
-            }
             RedisServer server = RedisServer.newRedisServer()
                     .port(port)
                     .setting("bind 127.0.0.1")
@@ -261,6 +263,14 @@ class RuntimeHmacIntegrationTest {
         }
     }
 
+    private static int freePort() {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (Exception exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
+    }
+
     private static byte[] bytes(String value) {
         return value.getBytes(StandardCharsets.UTF_8);
     }
@@ -269,6 +279,7 @@ class RuntimeHmacIntegrationTest {
     static class TestBeans {
 
         @Bean
+        @Primary
         Clock clock() {
             return Clock.fixed(NOW, ZoneOffset.UTC);
         }
@@ -277,5 +288,29 @@ class RuntimeHmacIntegrationTest {
         CredentialSecretDecryptor credentialSecretDecryptor() {
             return (context, ciphertext) -> SECRET.clone();
         }
+
+        @Bean
+        ProbeController probeController() {
+            return new ProbeController();
+        }
+    }
+
+    @RestController
+    static class ProbeController {
+
+        @GetMapping("/open/v1/probe")
+        ProbeResponse probe(HttpServletRequest request) {
+            return new ProbeResponse(
+                    (String) request.getAttribute(
+                            HmacAuthenticationFilter.AUTHENTICATED_APP_KEY_ATTRIBUTE
+                    ),
+                    (String) request.getAttribute(
+                            HmacAuthenticationFilter.REQUEST_ID_ATTRIBUTE
+                    )
+            );
+        }
+    }
+
+    record ProbeResponse(String appKey, String requestId) {
     }
 }
