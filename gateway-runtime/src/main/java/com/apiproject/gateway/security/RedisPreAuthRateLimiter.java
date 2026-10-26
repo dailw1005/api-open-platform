@@ -41,8 +41,10 @@ public final class RedisPreAuthRateLimiter implements PreAuthRateLimiter {
         if (limit <= 0) {
             throw new IllegalArgumentException("limit must be positive");
         }
-        if (window.isNegative() || window.isZero()) {
-            throw new IllegalArgumentException("window must be positive");
+        if (window.isNegative() || window.toMillis() <= 0) {
+            throw new IllegalArgumentException(
+                    "window must be at least one millisecond"
+            );
         }
     }
 
