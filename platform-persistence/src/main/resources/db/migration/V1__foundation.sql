@@ -398,3 +398,28 @@ BEFORE UPDATE OF api_id, owner_tenant_id, visibility, environment, status
 ON api_publication
 FOR EACH ROW
 EXECUTE FUNCTION enforce_active_publication_integrity();
+
+CREATE OR REPLACE FUNCTION verify_active_publication_at_commit()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM api_definition
+        WHERE active_prod_publication_id = NEW.id
+    ) AND NEW.status <> 'ACTIVE' THEN
+        RAISE EXCEPTION 'active publication must remain ACTIVE at commit'
+            USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER trg_api_publication_active_at_commit
+AFTER UPDATE OF status
+ON api_publication
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+EXECUTE FUNCTION verify_active_publication_at_commit();
