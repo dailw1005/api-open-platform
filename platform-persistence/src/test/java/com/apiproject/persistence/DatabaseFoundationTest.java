@@ -34,6 +34,8 @@ class DatabaseFoundationTest {
             "api_definition",
             "api_version",
             "api_publication",
+            "rate_limit_policy",
+            "quota_policy",
             "orchestration",
             "orchestration_version",
             "idempotency_record",

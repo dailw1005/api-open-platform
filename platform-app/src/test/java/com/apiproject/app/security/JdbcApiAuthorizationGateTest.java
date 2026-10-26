@@ -22,6 +22,7 @@ import static org.mockito.Mockito.when;
 class JdbcApiAuthorizationGateTest {
 
     private static final String APP_KEY = "ak_authorization_gate_123456";
+    private static final UUID APP_ID = UUID.randomUUID();
     private static final UUID API_ID = UUID.randomUUID();
     private static final UUID VERSION_ID = UUID.randomUUID();
     private static final UUID TENANT_ID = UUID.randomUUID();
@@ -49,6 +50,7 @@ class JdbcApiAuthorizationGateTest {
     void allowedDecisionReturnsAuthorizedApi() throws Exception {
         when(resultSet.next()).thenReturn(true, false);
         when(resultSet.getString("decision")).thenReturn("ALLOWED");
+        when(resultSet.getObject("app_id", UUID.class)).thenReturn(APP_ID);
         when(resultSet.getObject("api_id", UUID.class)).thenReturn(API_ID);
         when(resultSet.getObject("api_version_id", UUID.class)).thenReturn(VERSION_ID);
         when(resultSet.getObject("tenant_id", UUID.class)).thenReturn(TENANT_ID);
@@ -56,6 +58,7 @@ class JdbcApiAuthorizationGateTest {
 
         AuthorizedApi api = gate.authorize(APP_KEY, "GET", "/open/v1/orders");
 
+        assertEquals(APP_ID, api.appId());
         assertEquals(API_ID, api.apiId());
         assertEquals(VERSION_ID, api.apiVersionId());
         assertEquals(TENANT_ID, api.tenantId());
@@ -86,6 +89,7 @@ class JdbcApiAuthorizationGateTest {
     void multipleAllowedRowsFailClosed() throws Exception {
         when(resultSet.next()).thenReturn(true, true);
         when(resultSet.getString("decision")).thenReturn("ALLOWED");
+        when(resultSet.getObject("app_id", UUID.class)).thenReturn(APP_ID);
         when(resultSet.getObject("api_id", UUID.class)).thenReturn(API_ID);
         when(resultSet.getObject("api_version_id", UUID.class)).thenReturn(VERSION_ID);
         when(resultSet.getObject("tenant_id", UUID.class)).thenReturn(TENANT_ID);

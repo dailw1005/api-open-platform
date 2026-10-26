@@ -54,6 +54,7 @@ class GatewayDatabaseRoleVerifierTest {
         assertEquals("gateway_least_privilege", status.roleName());
         assertTrue(status.credentialFunctionExecute());
         assertTrue(status.authorizationFunctionExecute());
+        assertTrue(status.policyFunctionExecute());
     }
 
     @Test
@@ -135,6 +136,25 @@ class GatewayDatabaseRoleVerifierTest {
         assertTrue(exception.getMessage().contains("EXECUTE"));
     }
 
+    @Test
+    void rejectsGatewayRoleWithoutPostAuthPolicyExecute() throws Exception {
+        createRole(
+                "gateway_no_policy_function",
+                "LOGIN PASSWORD 'test-password'"
+        );
+        grantAuthenticationFunctionsWithoutPolicy("gateway_no_policy_function");
+
+        GatewayDatabaseRoleVerifier verifier =
+                verifierFor("gateway_no_policy_function");
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                verifier::verify
+        );
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+        assertTrue(exception.getMessage().contains("policy"));
+    }
+
     private static void createRole(String roleName, String attributes)
             throws SQLException {
         try (Connection connection = adminDataSource.getConnection();
@@ -145,6 +165,30 @@ class GatewayDatabaseRoleVerifierTest {
     }
 
     private static void grantFunctionOnly(String roleName) throws SQLException {
+        try (Connection connection = adminDataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("GRANT CONNECT ON DATABASE postgres TO " + roleName);
+            statement.execute("GRANT USAGE ON SCHEMA public TO " + roleName);
+            statement.execute(
+                    "GRANT EXECUTE ON FUNCTION auth_resolve_active_credential(text) "
+                            + "TO " + roleName
+            );
+            statement.execute(
+                    "GRANT EXECUTE ON FUNCTION "
+                            + "auth_authorize_public_api(text,text,text) "
+                            + "TO " + roleName
+            );
+            statement.execute(
+                    "GRANT EXECUTE ON FUNCTION "
+                            + "auth_resolve_post_auth_policies(uuid,uuid) "
+                            + "TO " + roleName
+            );
+        }
+    }
+
+    private static void grantAuthenticationFunctionsWithoutPolicy(
+            String roleName
+    ) throws SQLException {
         try (Connection connection = adminDataSource.getConnection();
              Statement statement = connection.createStatement()) {
             statement.execute("GRANT CONNECT ON DATABASE postgres TO " + roleName);

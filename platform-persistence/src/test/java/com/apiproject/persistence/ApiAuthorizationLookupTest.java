@@ -16,13 +16,28 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ApiAuthorizationLookupTest {
 
     private static final String FUNCTION_CALL = """
-            SELECT decision, api_id, api_version_id, visibility
+            SELECT decision, app_id, api_id, api_version_id, visibility
             FROM auth_authorize_public_api(?, ?, ?)
+            """;
+    private static final String POLICY_FUNCTION_CALL = """
+            SELECT
+                app_rate_requests,
+                app_rate_window_seconds,
+                app_rate_burst,
+                api_rate_requests,
+                api_rate_window_seconds,
+                api_rate_burst,
+                app_daily_quota,
+                app_monthly_quota,
+                api_daily_quota,
+                api_monthly_quota
+            FROM auth_resolve_post_auth_policies(?, ?)
             """;
 
     private static EmbeddedPostgres postgres;
@@ -58,9 +73,91 @@ class ApiAuthorizationLookupTest {
         );
 
         assertEquals("ALLOWED", decision.code());
+        assertEquals(fixture.appId(), decision.appId());
         assertEquals(fixture.apiId(), decision.apiId());
         assertEquals(fixture.apiVersionId(), decision.apiVersionId());
         assertEquals("PLATFORM_PUBLIC", decision.visibility());
+    }
+
+    @Test
+    void resolvesApplicationAndApiPolicyOverrides() throws Exception {
+        Fixture fixture = insertFixture("PLATFORM_PUBLIC", true, "ACTIVE");
+        insertRateLimitPolicy(
+                fixture.tenantId(),
+                "APP",
+                fixture.appId(),
+                30,
+                60,
+                6
+        );
+        insertRateLimitPolicy(
+                null,
+                "API",
+                fixture.apiId(),
+                20,
+                60,
+                4
+        );
+        insertQuotaPolicy(
+                fixture.tenantId(),
+                "APP",
+                fixture.appId(),
+                "DAY",
+                1_000
+        );
+        insertQuotaPolicy(
+                fixture.tenantId(),
+                "APP",
+                fixture.appId(),
+                "MONTH",
+                10_000
+        );
+        insertQuotaPolicy(
+                null,
+                "API",
+                fixture.apiId(),
+                "DAY",
+                500
+        );
+        insertQuotaPolicy(
+                null,
+                "API",
+                fixture.apiId(),
+                "MONTH",
+                5_000
+        );
+
+        EffectivePolicy policy = resolvePolicies(
+                fixture.appId(),
+                fixture.apiId()
+        );
+
+        assertEquals(30L, policy.appRateRequests());
+        assertEquals(60, policy.appRateWindowSeconds());
+        assertEquals(6, policy.appRateBurst());
+        assertEquals(20L, policy.apiRateRequests());
+        assertEquals(60, policy.apiRateWindowSeconds());
+        assertEquals(4, policy.apiRateBurst());
+        assertEquals(1_000L, policy.appDailyQuota());
+        assertEquals(10_000L, policy.appMonthlyQuota());
+        assertEquals(500L, policy.apiDailyQuota());
+        assertEquals(5_000L, policy.apiMonthlyQuota());
+    }
+
+    @Test
+    void returnsNullPolicyFieldsWhenNoOverridesExist() throws Exception {
+        Fixture fixture = insertFixture("PLATFORM_PUBLIC", true, "ACTIVE");
+
+        EffectivePolicy policy = resolvePolicies(
+                fixture.appId(),
+                fixture.apiId()
+        );
+
+        assertNull(policy.appRateRequests());
+        assertNull(policy.appRateWindowSeconds());
+        assertNull(policy.appRateBurst());
+        assertNull(policy.appDailyQuota());
+        assertNull(policy.apiMonthlyQuota());
     }
 
     @Test
@@ -148,7 +245,8 @@ class ApiAuthorizationLookupTest {
                         resultSet.getString(1),
                         resultSet.getObject(2, UUID.class),
                         resultSet.getObject(3, UUID.class),
-                        resultSet.getString(4)
+                        resultSet.getObject(4, UUID.class),
+                        resultSet.getString(5)
                 );
                 assertFalse(resultSet.next());
                 return decision;
@@ -181,6 +279,8 @@ class ApiAuthorizationLookupTest {
         );
         return new Fixture(
                 caller.appKey(),
+                caller.tenantId(),
+                caller.appId(),
                 foreignApi.apiId(),
                 foreignApi.apiVersionId(),
                 foreignApi.path()
@@ -238,6 +338,8 @@ class ApiAuthorizationLookupTest {
         }
         return new Fixture(
                 owner.appKey(),
+                owner.tenantId(),
+                owner.appId(),
                 apiId,
                 versionId,
                 "TENANT_PRIVATE".equals(visibility)
@@ -253,6 +355,101 @@ class ApiAuthorizationLookupTest {
     ) throws SQLException {
         try (Connection connection = dataSource.getConnection()) {
             insertGrant(connection, caller, apiId, status);
+        }
+    }
+
+    private static EffectivePolicy resolvePolicies(
+            UUID appId,
+            UUID apiId
+    ) throws SQLException {
+        try (Connection connection = runtimeConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     POLICY_FUNCTION_CALL
+             )) {
+            statement.setObject(1, appId);
+            statement.setObject(2, apiId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                assertTrue(resultSet.next());
+                EffectivePolicy policy = new EffectivePolicy(
+                        resultSet.getObject("app_rate_requests", Long.class),
+                        resultSet.getObject(
+                                "app_rate_window_seconds",
+                                Integer.class
+                        ),
+                        resultSet.getObject("app_rate_burst", Integer.class),
+                        resultSet.getObject("api_rate_requests", Long.class),
+                        resultSet.getObject(
+                                "api_rate_window_seconds",
+                                Integer.class
+                        ),
+                        resultSet.getObject("api_rate_burst", Integer.class),
+                        resultSet.getObject("app_daily_quota", Long.class),
+                        resultSet.getObject("app_monthly_quota", Long.class),
+                        resultSet.getObject("api_daily_quota", Long.class),
+                        resultSet.getObject("api_monthly_quota", Long.class)
+                );
+                assertFalse(resultSet.next());
+                return policy;
+            }
+        }
+    }
+
+    private static void insertRateLimitPolicy(
+            UUID tenantId,
+            String scopeType,
+            UUID scopeId,
+            long requests,
+            int windowSeconds,
+            int burst
+    ) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO rate_limit_policy (
+                         tenant_id,
+                         scope_type,
+                         scope_id,
+                         limit_value,
+                         window_seconds,
+                         burst,
+                         algorithm,
+                         enabled
+                     ) VALUES (?, ?, ?, ?, ?, ?, 'TOKEN_BUCKET', true)
+                     """)) {
+            statement.setObject(1, tenantId);
+            statement.setString(2, scopeType);
+            statement.setObject(3, scopeId);
+            statement.setLong(4, requests);
+            statement.setInt(5, windowSeconds);
+            statement.setInt(6, burst);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void insertQuotaPolicy(
+            UUID tenantId,
+            String scopeType,
+            UUID scopeId,
+            String period,
+            long limit
+    ) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO quota_policy (
+                         tenant_id,
+                         scope_type,
+                         scope_id,
+                         period,
+                         limit_value,
+                         metric,
+                         enabled
+                     ) VALUES (?, ?, ?, ?, ?, 'CALLS', true)
+                     """)) {
+            statement.setObject(1, tenantId);
+            statement.setString(2, scopeType);
+            statement.setObject(3, scopeId);
+            statement.setString(4, period);
+            statement.setLong(5, limit);
+            statement.executeUpdate();
         }
     }
 
@@ -278,6 +475,9 @@ class ApiAuthorizationLookupTest {
                     GRANT USAGE ON SCHEMA public TO app_runtime;
                     GRANT EXECUTE
                         ON FUNCTION auth_authorize_public_api(text, text, text)
+                        TO app_runtime;
+                    GRANT EXECUTE
+                        ON FUNCTION auth_resolve_post_auth_policies(uuid, uuid)
                         TO app_runtime;
                     """);
         }
@@ -487,6 +687,8 @@ class ApiAuthorizationLookupTest {
 
     private record Fixture(
             String appKey,
+            UUID tenantId,
+            UUID appId,
             UUID apiId,
             UUID apiVersionId,
             String path
@@ -495,9 +697,24 @@ class ApiAuthorizationLookupTest {
 
     private record Decision(
             String code,
+            UUID appId,
             UUID apiId,
             UUID apiVersionId,
             String visibility
+    ) {
+    }
+
+    private record EffectivePolicy(
+            Long appRateRequests,
+            Integer appRateWindowSeconds,
+            Integer appRateBurst,
+            Long apiRateRequests,
+            Integer apiRateWindowSeconds,
+            Integer apiRateBurst,
+            Long appDailyQuota,
+            Long appMonthlyQuota,
+            Long apiDailyQuota,
+            Long apiMonthlyQuota
     ) {
     }
 }

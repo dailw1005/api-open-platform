@@ -90,6 +90,18 @@ class RuntimeHmacIntegrationTest {
                 "gateway.security.pre-auth-rate-limit.requests",
                 () -> "100"
         );
+        registry.add(
+                "gateway.security.post-auth-limit.application-rate.requests",
+                () -> "10000"
+        );
+        registry.add(
+                "gateway.security.post-auth-limit.application-rate.window",
+                () -> "1h"
+        );
+        registry.add(
+                "gateway.security.post-auth-limit.application-rate.burst",
+                () -> "2"
+        );
     }
 
     @AfterAll
@@ -132,7 +144,7 @@ class RuntimeHmacIntegrationTest {
         assertTrue(success.body().contains(appKey));
         assertTrue(success.headers().firstValue("X-Request-Id").isPresent());
         assertEquals(
-                "100",
+                "2",
                 success.headers().firstValue("X-RateLimit-Limit").orElseThrow()
         );
         assertEquals(401, replay.statusCode());
@@ -180,6 +192,65 @@ class RuntimeHmacIntegrationTest {
 
         assertEquals(403, response.statusCode());
         assertTrue(response.body().contains("API_NOT_GRANTED"));
+    }
+
+    @Test
+    void postAuthApplicationTokenBucketRejectsExcessTraffic() throws Exception {
+        String appKey = insertCredential("ACTIVE", "ACTIVE");
+        grantProbeApi(appKey);
+
+        HttpResponse<String> first = signedProbe(appKey);
+        HttpResponse<String> second = signedProbe(appKey);
+        HttpResponse<String> third = signedProbe(appKey);
+
+        assertEquals(200, first.statusCode(), first.body());
+        assertEquals(200, second.statusCode(), second.body());
+        assertEquals(429, third.statusCode(), third.body());
+        assertTrue(third.body().contains("RATE_LIMITED"));
+        assertTrue(
+                third.headers().firstValue("Retry-After").orElseThrow()
+                        .matches("[0-9]+")
+        );
+    }
+
+    @Test
+    void applicationDailyQuotaReturnsQuotaExceeded() throws Exception {
+        String appKey = insertCredential("ACTIVE", "ACTIVE");
+        grantProbeApi(appKey);
+        UUID appId = appIdForKey(appKey);
+        ADMIN_JDBC.update(
+                """
+                INSERT INTO quota_policy (
+                    tenant_id, scope_type, scope_id, period, limit_value,
+                    metric, enabled
+                )
+                SELECT tenant_id, 'APP', id, 'DAY', 1, 'CALLS', true
+                FROM app
+                WHERE id = ?
+                """,
+                appId
+        );
+
+        assertEquals(200, signedProbe(appKey).statusCode());
+        HttpResponse<String> denied = signedProbe(appKey);
+
+        assertEquals(429, denied.statusCode(), denied.body());
+        assertTrue(denied.body().contains("QUOTA_EXCEEDED"));
+    }
+
+    private HttpResponse<String> signedProbe(String appKey) throws Exception {
+        String nonce = "nonce-" + UUID.randomUUID();
+        long timestamp = NOW.getEpochSecond();
+        String host = "127.0.0.1:" + serverPort;
+        return httpClient.send(
+                request(
+                        appKey,
+                        timestamp,
+                        nonce,
+                        signature(appKey, host, timestamp, nonce)
+                ),
+                HttpResponse.BodyHandlers.ofString()
+        );
     }
 
     private HttpRequest request(
@@ -318,7 +389,20 @@ class RuntimeHmacIntegrationTest {
                 ON FUNCTION auth_authorize_public_api(text,text,text)
                 TO gateway_staging
                 """);
+        ADMIN_JDBC.execute("""
+                GRANT EXECUTE
+                ON FUNCTION auth_resolve_post_auth_policies(uuid,uuid)
+                TO gateway_staging
+                """);
         return true;
+    }
+
+    private UUID appIdForKey(String appKey) {
+        return ADMIN_JDBC.queryForObject(
+                "SELECT app_id FROM app_credential WHERE app_key = ?",
+                UUID.class,
+                appKey
+        );
     }
 
     private void grantProbeApi(String appKey) {

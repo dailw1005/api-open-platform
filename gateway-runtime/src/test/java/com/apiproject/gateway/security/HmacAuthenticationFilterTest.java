@@ -124,7 +124,8 @@ class HmacAuthenticationFilterTest {
                 objectMapper,
                 Clock.fixed(NOW.plusSeconds(301), ZoneOffset.UTC),
                 allowingAuthorizationGate(),
-                allowingRateLimiter()
+                allowingRateLimiter(),
+                allowingPostAuthLimitGate()
         );
         staleFilter.doFilter(request, response, chain);
 
@@ -697,7 +698,8 @@ class HmacAuthenticationFilterTest {
                         10,
                         0,
                         42
-                )
+                ),
+                allowingPostAuthLimitGate()
         );
         MockHttpServletRequest request = bareRequest("GET", "/open/v1/orders");
         request.setRemoteAddr("203.0.113.10");
@@ -728,7 +730,8 @@ class HmacAuthenticationFilterTest {
                             "redis down",
                             null
                     );
-                }
+                },
+                allowingPostAuthLimitGate()
         );
         MockHttpServletRequest request = baseRequest("GET", "/open/v1/orders");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -744,6 +747,100 @@ class HmacAuthenticationFilterTest {
         );
         assertTrue(error.get("retryable").asBoolean());
         assertFalse(response.getContentAsString().contains("redis"));
+    }
+
+    @Test
+    void postAuthRateLimitDeniedAfterAuthorizationReturns429() throws Exception {
+        filter = filterWithPostAuthGate(
+                api -> new PostAuthRateLimitDecision(
+                        false,
+                        "RATE_LIMITED",
+                        20,
+                        0,
+                        30,
+                        2
+                )
+        );
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        JsonNode error = assertError(response, chain, 429, "RATE_LIMITED");
+        assertTrue(error.get("retryable").asBoolean());
+        assertEquals("20", response.getHeader("X-RateLimit-Limit"));
+        assertEquals("0", response.getHeader("X-RateLimit-Remaining"));
+        assertEquals("2", response.getHeader("Retry-After"));
+    }
+
+    @Test
+    void postAuthQuotaDeniedAfterAuthorizationReturns429() throws Exception {
+        filter = filterWithPostAuthGate(
+                api -> new PostAuthRateLimitDecision(
+                        false,
+                        "QUOTA_EXCEEDED",
+                        1_000,
+                        0,
+                        3_600,
+                        3_600
+                )
+        );
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        assertError(response, chain, 429, "QUOTA_EXCEEDED");
+        assertEquals("1000", response.getHeader("X-RateLimit-Limit"));
+        assertEquals("3600", response.getHeader("Retry-After"));
+    }
+
+    @Test
+    void postAuthLimitStoreFailureReturnsRetryable503() throws Exception {
+        filter = filterWithPostAuthGate(api -> {
+            throw new PostAuthRateLimitException(
+                    "RATE_LIMIT_UNAVAILABLE",
+                    true,
+                    "post-auth redis down",
+                    null
+            );
+        });
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        JsonNode error = assertError(
+                response,
+                chain,
+                503,
+                "RATE_LIMIT_UNAVAILABLE"
+        );
+        assertTrue(error.get("retryable").asBoolean());
+        assertFalse(response.getContentAsString().contains("post-auth redis down"));
     }
 
     @Test
@@ -793,12 +890,28 @@ class HmacAuthenticationFilterTest {
                 objectMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 authorizationGate,
-                allowingRateLimiter()
+                allowingRateLimiter(),
+                allowingPostAuthLimitGate()
+        );
+    }
+
+    private HmacAuthenticationFilter filterWithPostAuthGate(
+            PostAuthLimitGate postAuthLimitGate
+    ) {
+        return new HmacAuthenticationFilter(
+                appKey -> Optional.of(SECRET.clone()),
+                authenticator(nonceStore),
+                objectMapper,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                allowingAuthorizationGate(),
+                allowingRateLimiter(),
+                postAuthLimitGate
         );
     }
 
     private ApiAuthorizationGate allowingAuthorizationGate() {
         return (appKey, method, path) -> new AuthorizedApi(
+                UUID.fromString("00000000-0000-0000-0000-000000000004"),
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000002"),
                 UUID.fromString("00000000-0000-0000-0000-000000000003"),
@@ -812,6 +925,17 @@ class HmacAuthenticationFilterTest {
                 120,
                 119,
                 60
+        );
+    }
+
+    private PostAuthLimitGate allowingPostAuthLimitGate() {
+        return api -> new PostAuthRateLimitDecision(
+                true,
+                null,
+                120,
+                119,
+                60,
+                0
         );
     }
 
