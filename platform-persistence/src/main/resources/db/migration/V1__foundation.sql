@@ -368,3 +368,33 @@ BEFORE INSERT OR UPDATE OF active_prod_publication_id
 ON api_definition
 FOR EACH ROW
 EXECUTE FUNCTION enforce_active_publication_pointer();
+
+CREATE OR REPLACE FUNCTION enforce_active_publication_integrity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM api_definition
+        WHERE active_prod_publication_id = OLD.id
+    ) AND (
+        NEW.api_id <> OLD.api_id
+        OR NEW.owner_tenant_id <> OLD.owner_tenant_id
+        OR NEW.visibility <> OLD.visibility
+        OR NEW.environment <> OLD.environment
+        OR NEW.status = 'REVOKED'
+    ) THEN
+        RAISE EXCEPTION 'active publication cannot be revoked or reparented'
+            USING ERRCODE = '23514';
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_api_publication_active_integrity
+BEFORE UPDATE OF api_id, owner_tenant_id, visibility, environment, status
+ON api_publication
+FOR EACH ROW
+EXECUTE FUNCTION enforce_active_publication_integrity();
