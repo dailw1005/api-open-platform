@@ -281,13 +281,151 @@ class HmacAuthenticationFilterTest {
                 NONCE,
                 TIMESTAMP
         );
-        request.setContentLength(HmacAuthenticationFilter.MAX_BODY_BYTES + 1);
+        request.addHeader(
+                "Content-Length",
+                Integer.toString(HmacAuthenticationFilter.MAX_BODY_BYTES + 1)
+        );
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
         filter.doFilter(request, response, chain);
 
         assertError(response, chain, 413, "REQUEST_TOO_LARGE");
+    }
+
+    @Test
+    void streamingBodyLimitAppliesWithoutDeclaredContentLength() throws Exception {
+        byte[] body = new byte[HmacAuthenticationFilter.MAX_BODY_BYTES + 1];
+        MockHttpServletRequest request = signedRequest(
+                "POST",
+                "/open/v1/orders",
+                null,
+                body,
+                "application/json",
+                NONCE,
+                TIMESTAMP
+        );
+        request.removeHeader("Content-Length");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertError(response, chain, 413, "REQUEST_TOO_LARGE");
+    }
+
+    @Test
+    void negativeContentLengthReturns400() throws Exception {
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        request.addHeader("Content-Length", "-1");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertError(response, chain, 400, "INVALID_CONTENT_LENGTH");
+    }
+
+    @Test
+    void unavailableCredentialStoreReturns503AndIsRetryable() throws Exception {
+        filter = filterWithResolver(nonceStore, appKey -> {
+            throw new IllegalStateException("credential database down");
+        });
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        JsonNode error = assertError(
+                response,
+                chain,
+                503,
+                "CREDENTIAL_STORE_UNAVAILABLE"
+        );
+        assertTrue(error.get("retryable").asBoolean());
+    }
+
+    @Test
+    void exactPublicApiPathIsProtected() throws Exception {
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(200, response.getStatus());
+        assertNotNull(chain.getRequest());
+    }
+
+    @Test
+    void cachedBodyReaderPreservesDeclaredCharsetAndLength() throws Exception {
+        byte[] body = "caf\u00e9".getBytes(StandardCharsets.ISO_8859_1);
+        MockHttpServletRequest request = signedRequest(
+                "POST",
+                "/open/v1/orders",
+                null,
+                body,
+                "text/plain;charset=ISO-8859-1",
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        jakarta.servlet.http.HttpServletRequest downstream =
+                (jakarta.servlet.http.HttpServletRequest) chain.getRequest();
+        assertEquals("caf\u00e9", downstream.getReader().readLine());
+        assertEquals(body.length, downstream.getContentLength());
+        assertEquals(body.length, downstream.getContentLengthLong());
+    }
+
+    @Test
+    void cachedBodyReaderDefaultsToUtf8WithoutDeclaredCharset() throws Exception {
+        byte[] body = "\u4e2d\u6587".getBytes(StandardCharsets.UTF_8);
+        MockHttpServletRequest request = signedRequest(
+                "POST",
+                "/open/v1/orders",
+                null,
+                body,
+                "application/json",
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        jakarta.servlet.http.HttpServletRequest downstream =
+                (jakarta.servlet.http.HttpServletRequest) chain.getRequest();
+        assertEquals("\u4e2d\u6587", downstream.getReader().readLine());
     }
 
     @Test
