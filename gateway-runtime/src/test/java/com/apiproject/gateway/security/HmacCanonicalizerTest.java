@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class HmacCanonicalizerTest {
@@ -184,6 +185,95 @@ class HmacCanonicalizerTest {
         );
 
         assertEquals("INVALID_HOST", exception.code());
+    }
+
+    @Test
+    void rejectsShortSecret() {
+        HmacCanonicalizationException exception = assertThrows(
+                HmacCanonicalizationException.class,
+                () -> canonicalizer.canonicalize(
+                        requestWithPathAndQuery("/v1/users", null),
+                        bytes("too-short")
+                )
+        );
+
+        assertEquals("INVALID_SECRET", exception.code());
+    }
+
+    @Test
+    void rejectsMethodWithSurroundingWhitespace() {
+        HmacCanonicalizationException exception = assertThrows(
+                HmacCanonicalizationException.class,
+                () -> canonicalizer.canonicalize(
+                        new HmacCanonicalRequest(
+                                APP_KEY,
+                                " GET ",
+                                "api.example.com",
+                                "/v1/users",
+                                null,
+                                null,
+                                1_760_000_000L,
+                                NONCE,
+                                bytes("")
+                        ),
+                        SECRET
+                )
+        );
+
+        assertEquals("INVALID_METHOD", exception.code());
+    }
+
+    @Test
+    void rejectsInvalidDnsLabel() {
+        HmacCanonicalizationException exception = assertThrows(
+                HmacCanonicalizationException.class,
+                () -> canonicalizer.canonicalize(
+                        new HmacCanonicalRequest(
+                                APP_KEY,
+                                "GET",
+                                "-api.example.com",
+                                "/v1/users",
+                                null,
+                                null,
+                                1_760_000_000L,
+                                NONCE,
+                                bytes("")
+                        ),
+                        SECRET
+                )
+        );
+
+        assertEquals("INVALID_HOST", exception.code());
+    }
+
+    @Test
+    void requestToStringDoesNotExposeReplayOrQueryData() {
+        HmacCanonicalRequest request = new HmacCanonicalRequest(
+                APP_KEY,
+                "GET",
+                "api.example.com",
+                "/v1/users",
+                "token=secret-value",
+                null,
+                1_760_000_000L,
+                NONCE,
+                bytes("sensitive-body")
+        );
+
+        assertFalse(request.toString().contains("secret-value"));
+        assertFalse(request.toString().contains(NONCE));
+        assertFalse(request.toString().contains("sensitive-body"));
+    }
+
+    @Test
+    void resultToStringDoesNotExposeSignature() {
+        HmacCanonicalResult result = canonicalizer.canonicalize(
+                requestWithPathAndQuery("/v1/users", null),
+                SECRET
+        );
+
+        assertFalse(result.toString().contains(result.signatureHex()));
+        assertFalse(result.toString().contains(result.canonicalString()));
     }
 
     private HmacCanonicalRequest requestWithPathAndQuery(String path, String query) {
