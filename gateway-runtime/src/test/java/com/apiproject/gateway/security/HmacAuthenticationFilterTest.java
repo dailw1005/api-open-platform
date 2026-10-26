@@ -123,7 +123,8 @@ class HmacAuthenticationFilterTest {
                 authenticator(nonceStore),
                 objectMapper,
                 Clock.fixed(NOW.plusSeconds(301), ZoneOffset.UTC),
-                allowingAuthorizationGate()
+                allowingAuthorizationGate(),
+                allowingRateLimiter()
         );
         staleFilter.doFilter(request, response, chain);
 
@@ -682,6 +683,70 @@ class HmacAuthenticationFilterTest {
     }
 
     @Test
+    void rateLimitDeniedBeforeAuthenticationReturns429() throws Exception {
+        filter = new HmacAuthenticationFilter(
+                appKey -> {
+                    throw new AssertionError("credential resolver must not run");
+                },
+                authenticator(nonceStore),
+                objectMapper,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                allowingAuthorizationGate(),
+                clientAddress -> new RateLimitDecision(
+                        false,
+                        10,
+                        0,
+                        42
+                )
+        );
+        MockHttpServletRequest request = bareRequest("GET", "/open/v1/orders");
+        request.setRemoteAddr("203.0.113.10");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        JsonNode error = assertError(response, chain, 429, "RATE_LIMITED");
+        assertTrue(error.get("retryable").asBoolean());
+        assertEquals("42", response.getHeader("Retry-After"));
+        assertEquals("10", response.getHeader("X-RateLimit-Limit"));
+        assertEquals("0", response.getHeader("X-RateLimit-Remaining"));
+    }
+
+    @Test
+    void rateLimitStoreFailureReturnsRetryable503() throws Exception {
+        filter = new HmacAuthenticationFilter(
+                appKey -> Optional.of(SECRET.clone()),
+                authenticator(nonceStore),
+                objectMapper,
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                allowingAuthorizationGate(),
+                clientAddress -> {
+                    throw new PreAuthRateLimitException(
+                            "RATE_LIMIT_UNAVAILABLE",
+                            true,
+                            "redis down",
+                            null
+                    );
+                }
+        );
+        MockHttpServletRequest request = baseRequest("GET", "/open/v1/orders");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        JsonNode error = assertError(
+                response,
+                chain,
+                503,
+                "RATE_LIMIT_UNAVAILABLE"
+        );
+        assertTrue(error.get("retryable").asBoolean());
+        assertFalse(response.getContentAsString().contains("redis"));
+    }
+
+    @Test
     void resolverSecretIsWipedAfterAuthentication() throws Exception {
         byte[] resolvedSecret = SECRET.clone();
         filter = filterWithResolver(
@@ -727,7 +792,8 @@ class HmacAuthenticationFilterTest {
                 authenticator(nonceStore),
                 objectMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC),
-                authorizationGate
+                authorizationGate,
+                allowingRateLimiter()
         );
     }
 
@@ -737,6 +803,15 @@ class HmacAuthenticationFilterTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000002"),
                 UUID.fromString("00000000-0000-0000-0000-000000000003"),
                 "PLATFORM_PUBLIC"
+        );
+    }
+
+    private PreAuthRateLimiter allowingRateLimiter() {
+        return clientAddress -> new RateLimitDecision(
+                true,
+                120,
+                119,
+                60
         );
     }
 
