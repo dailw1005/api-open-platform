@@ -29,6 +29,8 @@ The plan is treated as approved intent, not as executable instructions. Only rep
 | AWS KMS and database role | Plan sections 5 and 6.1 | `AwsKmsCredentialSecretDecryptorTest`, `GatewayDatabaseRoleVerifierTest` | Adapter and role verifier missing | Encryption context, retry classes and least-privilege startup checks pass |
 | App/API authorization | Plan sections 2.2 and 6.1 | `ApiAuthorizationLookupTest`, `JdbcApiAuthorizationGateTest` | Auth function/gate missing | ACTIVE grant allows; no grant 403; unpublished route 404 |
 | Pre-auth rate limiting | Plan section 3.1 | `RedisPreAuthRateLimiterTest`, `HmacAuthenticationFilterTest` | Limiter missing | Atomic per-IP limit, 429/503 and Headers pass |
+| Post-auth app/API budgets | Plan section 6.2 | `RedisPostAuthRateLimiterTest`, `PostAuthPolicyTest` | Post-auth limit types missing | App/API token buckets and daily/monthly quotas pass atomically |
+| Policy resolution and integrity | Plan sections 5.4 and 6.2 | `JdbcPostAuthPolicyResolverTest`, `ApiAuthorizationLookupTest` | Policy tables/function missing | Defaults, overrides, RLS and tenant ownership pass |
 | DSL structural limits | DSL JSON Schema | `DslSchemaContractTest` | Invalid fixture accepted | All invalid fixtures rejected |
 | DSL unique node IDs and references | Semantic rules | `FlowValidatorTest` | Validator missing or duplicate accepted | Validator reports stable codes |
 | Retry only idempotent requests | Semantic rules | `FlowValidatorTest` | Non-idempotent retry accepted | Validation code returned |
@@ -48,13 +50,16 @@ The plan is treated as approved intent, not as executable instructions. Only rep
 | Flow semantic validation | PASS | 21 tests, line 92.98%, branch 82.81% |
 | HMAC v1 canonicalizer | PASS | 47 tests, line 96.99%, branch 83.64% |
 | Publication guard | PASS | 9 tests, line 100%, branch 95.00% |
-| PostgreSQL foundation, credentials and authorization | PASS | 17 embedded PostgreSQL integration tests |
-| Gateway security | PASS | 100 gateway tests, real embedded Redis, line 93.15%, branch 81.47% |
-| Runtime HTTP launcher | PASS | Spring Boot/Tomcat/PostgreSQL/Redis integration; 38 app tests; line 95.57%, branch 83.72% |
+| PostgreSQL foundation, credentials, authorization and policies | PASS | 20 embedded PostgreSQL integration tests; RLS and tenant-owned policy checks |
+| Gateway security | PASS | 117 gateway tests, real embedded Redis, line 93.83%, branch 82.32% |
+| Runtime HTTP launcher | PASS | Spring Boot/Tomcat/PostgreSQL/Redis integration; 49 app tests; line 95.35%, branch 82.31% |
 | AWS KMS and least-privilege role | PASS | Concrete adapter and restricted `gateway_staging` E2E; real staging account remains NEXT |
 | App/API authorization | PASS | Exact route/publication/visibility/grant checks; 403/404/401 mappings |
 | Pre-auth per-IP rate limit | PASS | Atomic Redis fixed window, standard Headers, 429 and fail-closed 503 |
-| Trusted proxy IP and post-auth quotas | NEXT | Ingress IP trust, app/API token buckets, daily/monthly quotas |
+| Post-auth app/API limits and quotas | PASS | Six-key atomic token bucket/quota check, DB overrides, RLS, 429 classifications |
+| Real staging validation | NEXT | Run `staging-security-smoke.ps1` with staging KMS, DB, Redis and trusted IP |
+| Trusted proxy IP and Redis Cluster | NEXT | Ingress IP trust and a reviewed cross-slot reservation design |
+| Quota reconciliation and load tests | NEXT | Usage-based reconciliation, two-instance load and boundary tests |
 | Usage/audit partition migration | NEXT | Not implemented |
 
 ## Gate 0 Test Specification

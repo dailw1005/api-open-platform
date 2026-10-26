@@ -6,11 +6,12 @@
 - HMAC Servlet Filter authentication, request-body limits, error mapping and replay ordering.
 - Spring Boot runtime registration, JDBC credential resolution and concrete AWS KMS decryptor.
 - Exact-route application/API authorization and pre-authentication rate limiting.
+- Post-authentication application/API token buckets and UTC daily/monthly quotas.
 - Publication activation guard.
-- PostgreSQL foundation, credential and API authorization lookup migrations, composite tenant keys, RLS and active-publication triggers.
+- PostgreSQL foundation, credential/authorization/policy lookup migrations, composite tenant keys, RLS and active-publication triggers.
 
 This review does not claim that real staging AWS KMS/key-policy validation,
-trusted proxy IP extraction, post-auth app/API quotas or upstream routing is complete.
+trusted proxy IP extraction, Redis Cluster coordination, quota reconciliation or upstream routing is complete.
 
 ## Checklist
 
@@ -25,9 +26,11 @@ trusted proxy IP extraction, post-auth app/API quotas or upstream routing is com
 | Credential lookup privilege | PASS | `auth_resolve_active_credential` is `SECURITY DEFINER`, has a fixed `search_path`, revokes `PUBLIC`, and is tested through the non-superuser `app_runtime` role with explicit `EXECUTE`. |
 | Credential lifecycle | PASS | Active and unexpired rotating credentials resolve; suspended tenant/app, revoked and expired credentials return no row. |
 | KMS encryption context | PASS | AWS KMS decrypt requests bind `tenantId`, `appId`, `credentialId` and `appKey`; 429/5xx and transport errors are retryable, deterministic KMS failures are not. |
-| Database role verification | PASS | Startup rejects superuser/BYPASSRLS roles, requires both authentication function grants, and rejects direct `app_credential` DML access. The runtime E2E test uses a restricted login role. |
+| Database role verification | PASS | Startup rejects superuser/BYPASSRLS roles, requires credential, authorization and post-auth policy function grants, and rejects direct `app_credential` DML access. The runtime E2E test uses a restricted login role. |
 | API authorization | PASS | Exact active method/path, PROD publication, tenant visibility and ACTIVE app grant are required after signature/Nonce verification; no-grant returns 403 and unpublished/foreign-private routes return 404. |
 | Pre-auth rate limit | PASS | Redis Lua applies atomic fixed-window per-IP limiting before Header/body processing; denial is 429 with standard Headers and Redis errors fail closed as 503. |
+| Post-auth limits | PASS | One Lua command checks application/API token buckets plus daily/monthly quotas with captured Redis time; any denial consumes no other dimension. |
+| Policy tenant integrity | PASS | Policy tables use RLS and unique scope keys; application policy rows must match the application tenant, while API policies must be platform-global. |
 | Injection | PASS | Database integration tests use prepared statements; migrations use static SQL and typed parameters. |
 | Tenant isolation | PASS | Composite foreign keys, RLS policies and cross-tenant insert/select tests pass on PostgreSQL 18.6. |
 | Publication integrity | PASS | Guard plus database trigger reject non-PROD, mismatched, revoked and reparented active publications. |
@@ -116,6 +119,20 @@ trusted proxy IP extraction, post-auth app/API quotas or upstream routing is com
 - **Fix:** Added a Redis Lua fixed-window per-IP limiter before Header/body processing, standard rate-limit Headers, 429 and fail-closed 503.
 - **Evidence:** `RedisPreAuthRateLimiterTest`, `HmacAuthenticationFilterTest`, `RuntimeHmacIntegrationTest`.
 
+### Fixed: authenticated applications had no application/API budgets
+
+- **Severity:** High before the fix
+- **Risk:** A valid credential could consume unlimited application and platform API capacity after passing authentication.
+- **Fix:** Added database-backed application/API token buckets and independent UTC daily/monthly quotas. A single Lua command checks all six dimensions, consumes none when any rejects, and uses captured Redis time for refill and period boundaries.
+- **Evidence:** `RedisPostAuthRateLimiterTest`, `JdbcPostAuthPolicyResolverTest`, `ApiAuthorizationLookupTest`, `RuntimeHmacIntegrationTest`.
+
+### Fixed: policy scope could be ambiguous across tenants
+
+- **Severity:** High before the fix
+- **Risk:** An incorrect application policy row could be read for another tenant, and tenant-dependent uniqueness could produce multiple effective rows.
+- **Fix:** Scope uniqueness no longer includes tenant, RLS isolates tenant policy rows, and the security-definer resolver requires application policy `tenant_id` to match the actual app owner. API policies are global.
+- **Evidence:** `ApiAuthorizationLookupTest`, `DatabaseFoundationTest`.
+
 ### Accepted: every authenticated request performs database and KMS work
 
 - **Severity:** Medium until capacity testing
@@ -137,8 +154,26 @@ trusted proxy IP extraction, post-auth app/API quotas or upstream routing is com
 ### Accepted: fixed window and per-IP-only rate limiting
 
 - **Severity:** Medium
-- **Residual risk:** A boundary burst can approach twice the configured rate, NAT clients share a bucket, and authenticated per-app/API quotas are not yet enforced.
-- **Required follow-up:** Add per-app/API post-auth token-bucket or sliding-window limits, quotas and load tests; retain the pre-auth limit as one defense layer.
+- **Residual risk:** A boundary burst can approach twice the configured pre-auth rate, NAT clients share a bucket, and the pre-auth layer remains per-IP only.
+- **Required follow-up:** Retain pre-auth limiting as one layer, add ingress/connection controls and multi-instance load tests around both limiter layers.
+
+### Accepted: Redis Cluster is not supported for the six-key quota command
+
+- **Severity:** High before horizontal Redis Cluster rollout
+- **Residual risk:** The atomic post-auth Lua command spans application and API keys. Redis Cluster can reject it with a cross-slot error, and splitting the command would break no-partial-consumption semantics.
+- **Required follow-up:** Use one reviewed endpoint for MVP staging/production, or design a shared-slot/two-phase reservation protocol with crash recovery before enabling Redis Cluster.
+
+### Accepted: quotas are admission counters, not reconciled usage
+
+- **Severity:** Medium
+- **Residual risk:** A request that passes all gates consumes quota even if downstream routing later fails. Redis loss or counter drift is not yet reconciled from immutable usage records.
+- **Required follow-up:** Implement metering outbox, usage records and scheduled/quarantined reconciliation. Preserve fail-closed behavior until reconciliation state is trustworthy.
+
+### Deferred: tenant-scope policy is not enforced yet
+
+- **Severity:** Medium
+- **Residual risk:** The policy schema accepts `TENANT` scope, but the runtime decision currently resolves only application and API budgets.
+- **Required follow-up:** Add tenant-scope policy resolution and cross-layer tests before claiming the full tenant/app/API hierarchy.
 
 ### Accepted: authorization uses exact route matching
 
@@ -149,6 +184,7 @@ trusted proxy IP extraction, post-auth app/API quotas or upstream routing is com
 ## Verdict
 
 No unresolved High finding remains in the implemented and locally tested
-component boundaries. Real staging dependencies and trusted client-IP
-configuration remain explicit High deployment prerequisites; remaining Medium
-residuals are tracked in the TDD evidence report.
+component boundaries. Real staging dependencies, trusted client-IP
+configuration and Redis Cluster coordination remain explicit High deployment
+prerequisites; remaining reconciliation and routing gaps are tracked in the TDD
+evidence report.

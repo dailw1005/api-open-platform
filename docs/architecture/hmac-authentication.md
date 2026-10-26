@@ -31,7 +31,9 @@ outside that prefix pass through unchanged.
 7. Recompute HMAC-SHA256 and compare with `MessageDigest.isEqual`.
 8. Atomically claim the app/nonce pair in Redis with `SET NX PX`.
 9. Resolve the exact published method/path and require an ACTIVE app grant.
-10. Attach authenticated identity and the authorized API snapshot, then pass
+10. Atomically check application/API token buckets and application/API daily
+    and monthly quotas.
+11. Attach authenticated identity and the authorized API snapshot, then pass
     the request to routing.
 
 The nonce is deliberately claimed after signature verification so an
@@ -78,8 +80,8 @@ Rejected requests additionally receive `Retry-After` and HTTP 429.
 
 Redis failure is fail-closed as retryable 503. The current fixed window is a
 coarse anti-abuse control: bursts at a window boundary can reach approximately
-twice the configured limit. Per-app/API quotas and precise multi-layer limits
-remain a later slice.
+twice the configured limit. It remains the first abuse-control layer; the
+post-authentication limits below run after signature and authorization checks.
 
 ## Credential Decryption
 
@@ -111,10 +113,67 @@ match and returns:
   `TENANT_PRIVATE` API belongs to another tenant;
 - `INVALID_CREDENTIAL` if the credential state changed between authentication
   and authorization;
-- `ALLOWED` with API, version, tenant and visibility metadata.
+- `ALLOWED` with application, API, version, tenant and visibility metadata.
 
-Both credential and authorization lookup functions are `SECURITY DEFINER`,
-revoke `PUBLIC`, and must be granted to the non-superuser gateway role.
+The credential, authorization and policy lookup functions are `SECURITY
+DEFINER`, revoke `PUBLIC`, and must be granted to the non-superuser gateway
+role.
+
+## Post-Authentication Limits And Quotas
+
+Post-authentication limits run after the nonce claim and exact-route
+authorization. Application limits use `app_id`, while API limits use `api_id`
+and are global across applications and tenants.
+
+The effective policy combines database overrides with mandatory process
+defaults:
+
+- application and API token buckets: sustained token rate, window and burst;
+- application and API quotas: UTC daily and monthly `CALLS`.
+
+`rate_limit_policy` and `quota_policy` overrides are read through
+`auth_resolve_post_auth_policies(appId, apiId)`. An omitted application or API
+policy falls back to the configured defaults; an incomplete token-bucket
+override or malformed database value fails closed as
+`INTERNAL_CONFIGURATION`.
+
+One Redis Lua command checks all six counters before writing any state:
+
+```text
+app token bucket
+API token bucket
+app daily quota
+app monthly quota
+API daily quota
+API monthly quota
+```
+
+If any layer rejects, no token or quota counter is consumed. Redis `TIME` is
+captured once and passed into the script so token refill, UTC period keys and
+expiry boundaries use the same server-derived instant.
+
+Keys are scoped by stable identifiers:
+
+```text
+apip:limit:postauth:v1:token:app:<appId>
+apip:limit:postauth:v1:token:api:<apiId>
+apip:limit:postauth:v1:quota:app:<appId>:<day|month>:<period>
+apip:limit:postauth:v1:quota:api:<apiId>:<day|month>:<period>
+```
+
+Allowed requests receive `X-RateLimit-*` for the currently most constrained
+layer, replacing the coarser pre-auth values. A token-bucket rejection returns
+429 `RATE_LIMITED`; a daily or monthly rejection returns 429
+`QUOTA_EXCEEDED`. Both include `Retry-After`. Redis or policy-source failure is
+retryable 503 `RATE_LIMIT_UNAVAILABLE`.
+
+Counters are admission counters. They are consumed when the request passes all
+authentication/authorization/limit gates, before routing. Upstream usage,
+billing and periodic quota reconciliation remain separate metering work.
+
+The multi-key Lua operation currently targets one Redis endpoint, not Redis
+Cluster. A Cluster deployment must not silently split these checks; it requires
+an explicitly designed shared-slot or two-phase reservation strategy.
 
 ## Error Contract
 
@@ -136,7 +195,7 @@ All Filter errors use the stable JSON envelope:
 | 403 | `API_NOT_GRANTED` | false |
 | 404 | `API_NOT_FOUND` | false |
 | 413 | `REQUEST_TOO_LARGE` | false |
-| 429 | `RATE_LIMITED` | true |
+| 429 | `RATE_LIMITED`, `QUOTA_EXCEEDED` | true |
 | 500 | `INTERNAL_CONFIGURATION`, `INTERNAL_ERROR` | false |
 | 503 | `NONCE_STORE_UNAVAILABLE`, `CREDENTIAL_STORE_UNAVAILABLE`, `AUTHORIZATION_STORE_UNAVAILABLE`, `RATE_LIMIT_UNAVAILABLE` | true |
 
@@ -171,8 +230,8 @@ on the next request. A bounded cache may be added later only with
 credential/app epoch validation and a strict maximum staleness window.
 
 Startup also verifies that the connected database role is not superuser, does
-not have `BYPASSRLS`, can execute both authentication functions, and cannot
-select or mutate `app_credential` directly.
+not have `BYPASSRLS`, can execute the credential, authorization and post-auth
+policy functions, and cannot select or mutate `app_credential` directly.
 
 ## Remaining Production Work
 
@@ -181,8 +240,8 @@ select or mutate `app_credential` directly.
 - Configure trusted reverse-proxy client-IP extraction or ingress-level
   rate limiting; direct `remoteAddr` is only correct when the gateway is the
   network edge.
-- Add per-app/API post-auth limits, daily/monthly quotas, token-bucket or
-  sliding-window algorithms, and bounded request concurrency.
+- Add bounded request concurrency, distributed Redis Cluster coordination,
+  multi-instance load tests and quota reconciliation from immutable usage.
 - Replace exact path matching with reviewed route-template resolution.
 - Add route resolution, upstream proxy/orchestration dispatch, metering and
   sanitized request logging.

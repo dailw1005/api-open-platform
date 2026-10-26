@@ -186,6 +186,22 @@
 - **Coverage:** gateway line 93.15% (626/672), branch 81.47% (321/394); runtime line 95.57% (194/203), branch 83.72% (72/86).
 - **Git evidence:** RED `882e814`; GREEN `9797dd0`; boundary RED `ebd1614`; GREEN `3376f7e`.
 
+## Post-Auth Limits And Quotas Slice
+
+- **RED:** `mvn -pl platform-app -am test` failed compilation because post-auth policy, decision, Redis limiter and policy resolver types did not exist.
+- **Policy data:** V4 adds `rate_limit_policy` and `quota_policy`, RLS, unique scope keys, `app_id` in authorization output and `auth_resolve_post_auth_policies(appId, apiId)`.
+- **Tenant integrity RED/GREEN:** a database test first proved a policy owned by another tenant was incorrectly returned, then required application ownership matching and ignored the mismatched row after the fix.
+- **Redis algorithm:** One Lua command captures one Redis `TIME`, reads application/API token buckets and UTC daily/monthly quotas, evaluates all six dimensions, and writes none if any dimension rejects.
+- **HTTP boundary:** Authorization precedes post-auth limiting. `RATE_LIMITED`, `QUOTA_EXCEEDED`, standard headers, retry delay and retryable 503 mapping pass through the Filter.
+- **Failure classification:** Partial token-bucket overrides fail as `INTERNAL_CONFIGURATION`; policy DB/Redis failure returns retryable `RATE_LIMIT_UNAVAILABLE` without internal details.
+- **Quota semantics:** Application scope is global across credential rotation; API scope is global across applications and tenants. Token/quota counters are admission counters, not metered usage.
+- **Cluster boundary:** The multi-key script targets one Redis endpoint. Redis Cluster remains unsupported until a cross-slot or two-phase protocol is designed and tested.
+- **Staging arrangement:** `scripts/staging-security-smoke.ps1` covers valid, replay, token bucket, daily quota and monthly quota scenarios. Syntax, HMAC golden vector and missing-configuration fail-fast were checked locally.
+- **Staging result:** NOT EXECUTED. No staging URL, Secret, AWS credentials or CLI access is configured in this workspace.
+- **GREEN:** `mvn verify`
+- **Result:** 229 tests, 0 failures, 0 errors, 0 skipped. Gateway line 93.83%, branch 82.32%; runtime line 95.35%, branch 82.31%.
+- **Git evidence:** RED `a1e6dce`; GREEN `601a8b4`; staging harness `c157dff`.
+
 ## Git Checkpoints
 
 | Slice | RED | GREEN | Follow-up |
@@ -200,6 +216,8 @@
 | AWS KMS and staging role | `89fe275` | `539c653` | Concrete decryptor, role startup verification |
 | App/API authorization | `df92e74` | `9f367db` | V3 decision function and Filter gate |
 | Pre-auth rate limit | `882e814` | `9797dd0` | `ebd1614` RED, `3376f7e` sub-ms boundary fix |
+| Post-auth app/API limits and quotas | `a1e6dce` | `601a8b4` | Tenant/RLS and Redis-time hardening inside GREEN |
+| Staging post-auth smoke harness | n/a | `c157dff` | Real staging execution remains blocked |
 
 ## Final Verification
 
@@ -207,29 +225,29 @@
 - **Result:** BUILD SUCCESS
 - **Contract tests:** 13 passed
 - **Flow validator tests:** 21 passed
-- **Gateway tests:** 100 passed
+- **Gateway tests:** 117 passed
 - **Publication guard tests:** 9 passed
-- **PostgreSQL tests:** 17 passed
-- **Runtime tests:** 38 passed
-- **Total tests:** 198 passed, 0 failed, 0 errors, 0 skipped
-- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 93.15%/branch 81.47%; control line 100%/branch 95.00%; runtime line 95.57%/branch 83.72%
+- **PostgreSQL tests:** 20 passed
+- **Runtime tests:** 49 passed
+- **Total tests:** 229 passed, 0 failed, 0 errors, 0 skipped
+- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 93.83%/branch 82.32%; control line 100%/branch 95.00%; runtime line 95.35%/branch 82.31%
 
 ## Self Evaluation
 
 | Axis | Score | Evidence |
 | --- | --- | --- |
-| Accuracy | 5 | OpenAPI parses, all 198 tests pass, PostgreSQL constraints, AWS KMS request semantics, Redis replay/rate limiting and a real restricted-role Tomcat HTTP path are exercised, and JaCoCo gates pass. |
-| Completeness | 4 | Gate 0, semantic validation, HMAC verification, AWS KMS, role verification, app/API authorization, pre-auth rate limiting, publication guard and DB foundation are complete. Staging dependencies, trusted proxy IP handling, post-auth quotas, routing/orchestration execution and usage/audit persistence remain future TDD slices. |
+| Accuracy | 5 | OpenAPI parses, all 229 tests pass, PostgreSQL policy/RLS constraints, AWS KMS request semantics, Redis replay and six-key quota semantics, and a restricted-role Tomcat HTTP path are exercised, and JaCoCo gates pass. |
+| Completeness | 4 | Gate 0, semantic validation, HMAC verification, AWS KMS, role verification, app/API authorization, pre/post-auth limiting, daily/monthly quotas, publication guard and DB foundation are complete. Real staging, Redis Cluster, trusted proxy IP handling, reconciliation, routing/orchestration and usage/audit persistence remain future TDD slices. |
 | Clarity | 4 | Contracts, test map and evidence report are linked and use stable error codes. The OpenAPI artifact is large and will benefit from generated documentation. |
 | Actionability | 5 | `mvn verify` is the single validation command. The contract map identifies the next RED targets. |
 | Conciseness | 4 | Test and contract artifacts are focused; the full OpenAPI file is large but serves as the authoritative consumer boundary. |
 
-**Overall:** 4.4 / 5
+**Overall:** 4.5 / 5
 
 **Highest-impact improvements:**
 
-1. Validate AWS KMS, PostgreSQL role, Redis TLS and trusted proxy client-IP handling in staging.
-2. Add per-app/API post-auth token-bucket limits and daily/monthly quotas with load tests.
+1. Execute the staging smoke harness against real KMS, PostgreSQL grants, Redis TLS and trusted proxy routing.
+2. Add two-instance load/boundary tests, usage reconciliation and a reviewed Redis Cluster strategy.
 3. Add route-template resolution, upstream proxy/orchestration execution and usage/request/audit persistence.
 
-**Self-check:** The 4.4 score reflects that KMS, role verification, authorization and pre-auth limiting are verifiably complete locally, while real staging dependencies, proxy trust, routing and persistence are explicitly identified.
+**Self-check:** The 4.5 score reflects that authentication, authorization, pre/post-auth limits and quotas are verifiably complete locally, while real staging dependencies, proxy trust, Redis Cluster, reconciliation, routing and persistence are explicitly identified.

@@ -16,7 +16,9 @@ for:
 `V2__active_credential_lookup.sql` adds the constrained gateway authentication
 lookup function.
 `V3__api_authorization_lookup.sql` adds exact-route application/grant
-authorization.
+authorization. `V4__post_auth_limits_and_policies.sql` adds application/API
+rate and quota policies, returns `app_id` from authorization and adds the
+restricted policy lookup function.
 
 Runtime target: PostgreSQL 16+; integration tests run against embedded PostgreSQL 18.6.
 
@@ -73,11 +75,37 @@ function with a fixed `search_path`. It:
 - requires an ACTIVE `app_api_grant`;
 - returns stable decisions `ALLOWED`, `API_NOT_FOUND`, `API_NOT_GRANTED` or
   `INVALID_CREDENTIAL`;
+- returns `app_id` on `ALLOWED` so post-auth counters are application-wide
+  across credential rotation;
 - revokes execution from `PUBLIC`.
 
-Gateway startup verifies `EXECUTE` on both `auth_resolve_active_credential` and
-`auth_authorize_public_api`, rejects superuser/BYPASSRLS roles, and verifies the
-role has no direct `app_credential` DML privileges.
+Gateway startup verifies `EXECUTE` on `auth_resolve_active_credential`,
+`auth_authorize_public_api` and `auth_resolve_post_auth_policies`, rejects
+superuser/BYPASSRLS roles, and verifies the role has no direct
+`app_credential` DML privileges.
+
+## Post-Auth Policy Lookup
+
+`rate_limit_policy` stores one `TOKEN_BUCKET` rule per `TENANT`, `APP` or `API`
+scope. `quota_policy` stores independent `DAY`/`MONTH` `CALLS` limits. Both
+tables:
+
+- enable RLS;
+- isolate tenant-owned rows with `app_current_tenant_id()`;
+- keep API-scope rows global with `tenant_id IS NULL`;
+- use unique scope keys so one scope cannot resolve to ambiguous rows.
+
+The current runtime resolves `APP` and `API` scopes. `TENANT` scope is schema
+groundwork and is not yet included in the post-auth decision.
+
+`auth_resolve_post_auth_policies(appId, apiId)` is `SECURITY DEFINER` with a
+fixed `search_path`. Application policy rows must match the application's
+actual `tenant_id`; mismatched rows are ignored. API policy rows must be
+platform-global. The function returns one row of nullable overrides, allowing
+the runtime to apply mandatory process defaults where no row exists.
+
+The gateway role receives `EXECUTE` only. It does not receive direct policy
+table access.
 
 ## Test Command
 
@@ -101,6 +129,9 @@ The tests use native embedded PostgreSQL, run Flyway, assume a non-superuser run
 - exact published routes with ACTIVE grants return ALLOWED;
 - missing/revoked grants, private cross-tenant APIs and credential races fail
   with stable decisions.
+- application/API policy overrides resolve through the restricted function;
+- policy tables enforce RLS and unique scope resolution;
+- application policy rows owned by another tenant are ignored.
 
 ## Out Of Scope
 

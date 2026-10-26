@@ -22,6 +22,16 @@ gateway.security.kms.endpoint-override (optional)
 gateway.security.kms.api-call-timeout=3s
 gateway.security.pre-auth-rate-limit.requests=120
 gateway.security.pre-auth-rate-limit.window=60s
+gateway.security.post-auth-limit.application-rate.requests=600
+gateway.security.post-auth-limit.application-rate.window=60s
+gateway.security.post-auth-limit.application-rate.burst=120
+gateway.security.post-auth-limit.api-rate.requests=300
+gateway.security.post-auth-limit.api-rate.window=60s
+gateway.security.post-auth-limit.api-rate.burst=60
+gateway.security.post-auth-limit.application-quota.daily=100000
+gateway.security.post-auth-limit.application-quota.monthly=2000000
+gateway.security.post-auth-limit.api-quota.daily=50000
+gateway.security.post-auth-limit.api-quota.monthly=1000000
 spring.flyway.enabled=false
 ```
 
@@ -37,10 +47,15 @@ unless the connected role:
 - does not have `BYPASSRLS`;
 - has `EXECUTE` on `auth_resolve_active_credential(text)`;
 - has `EXECUTE` on `auth_authorize_public_api(text,text,text)`;
+- has `EXECUTE` on `auth_resolve_post_auth_policies(uuid,uuid)`;
 - has no direct `SELECT`, `INSERT`, `UPDATE` or `DELETE` on `app_credential`.
 
 Capture the startup verification result and the deployed role name. A successful
 embedded test is not a substitute for this staging run.
+
+V4 drops and recreates `auth_authorize_public_api` to add `app_id` to its result.
+Regrant function execution after applying V4. Do not grant direct access to
+`rate_limit_policy` or `quota_policy`.
 
 ## AWS KMS Gate
 
@@ -58,15 +73,50 @@ embedded test is not a substitute for this staging run.
 
 Do not print Secret plaintext, ciphertext or raw KMS exception messages.
 
+## Post-Auth Policy Gate
+
+Prepare disposable staging applications and API rows before traffic tests:
+
+- an app token-bucket policy with known burst and a long refill window;
+- an API token-bucket policy with known burst;
+- an app with `DAY` or `MONTH` quota set to one and token-bucket capacity high
+  enough that quota is the first rejection;
+- two applications in different tenants authorized for the same API to prove
+  API-scope counters are global;
+- no application policy row for one control app, proving mandatory defaults
+  apply.
+
+Verify that application-scope policies carry the application's actual
+`tenant_id`, API-scope policies have `tenant_id IS NULL`, and the authenticated
+role cannot select either policy table directly.
+
 ## Redis Gate
 
 - Redis uses TLS and authentication outside localhost.
 - `maxmemory-policy` is `noeviction`.
-- Nonce and pre-auth rate-limit keys use the isolated security instance/logical
-  database.
+- Nonce, pre-auth, token-bucket and quota keys use the isolated security
+  instance/logical database.
 - Connection and command timeouts are bounded.
 - Redis unavailability returns fail-closed retryable errors, never bypasses
   nonce or rate-limit checks.
+- `TIME` is available. Post-auth token refill, UTC period keys and expiry use
+  one captured Redis server time.
+- The deployment is a single Redis endpoint. Redis Cluster is not supported
+  for the six-key post-auth Lua command until a cross-slot design is tested.
+- Two gateway instances pointed at the same Redis endpoint must share the same
+  application, API and quota counters.
+
+Recommended Redis settings:
+
+```text
+maxmemory-policy noeviction
+requirepass <from secret manager>
+tls-port <configured>
+timeout <bounded>
+tcp-keepalive <bounded>
+```
+
+Do not print the Redis password or URI.
 
 ## Client IP Gate
 
@@ -81,6 +131,47 @@ models:
 Never accept arbitrary client-supplied forwarding Headers. Document the ingress
 hop count, proxy allowlist and Header rewrite rule.
 
+## Smoke Harness
+
+`scripts/staging-security-smoke.ps1` signs requests with HMAC v1 and never
+prints the Secret or Signature. Populate values from the staging secret store:
+
+```text
+STAGING_BASE_URL
+STAGING_APP_KEY
+STAGING_APP_SECRET
+STAGING_PATH
+```
+
+Run the scenarios with `pwsh`:
+
+```powershell
+pwsh -NoProfile -File scripts/staging-security-smoke.ps1 -Scenario Valid
+pwsh -NoProfile -File scripts/staging-security-smoke.ps1 -Scenario Replay
+pwsh -NoProfile -File scripts/staging-security-smoke.ps1 `
+  -Scenario TokenBucket -ExpectedAllowed 5 -MaxRequests 10
+pwsh -NoProfile -File scripts/staging-security-smoke.ps1 `
+  -Scenario DayQuota -MaxRequests 10
+pwsh -NoProfile -File scripts/staging-security-smoke.ps1 `
+  -Scenario MonthQuota -MaxRequests 10
+```
+
+Use a different disposable app for each destructive quota scenario. For the
+global API counter test, exhaust or inspect the API limit with tenant A and
+then run the same API scenario with tenant B before Redis state expires. Keep
+the pre-auth per-IP limit above the scenario request count.
+
+HTTP is rejected by default; `-AllowInsecure` exists only for an explicitly
+approved local tunnel. Query strings, dot segments and percent-encoded paths are
+out of scope for this smoke harness.
+
+## Execution Record
+
+**2026-10-26: NOT EXECUTED.** The workspace has no staging base URL,
+application Secret, AWS credentials, AWS CLI, Redis CLI or PostgreSQL CLI
+configured. PowerShell syntax, the HMAC golden vector and fail-fast behavior
+without configuration were verified locally. This is not a staging PASS.
+
 ## Acceptance
 
 - Runtime starts only with the least-privilege database role.
@@ -89,5 +180,10 @@ hop count, proxy allowlist and Header rewrite rule.
 - Missing app/API grant returns 403.
 - Unknown/unpublished route returns 404.
 - Exceeded pre-auth limit returns 429 with rate-limit Headers.
+- Application and API token buckets return 429 `RATE_LIMITED` with
+  `Retry-After`.
+- Daily and monthly quotas return 429 `QUOTA_EXCEEDED` with `Retry-After`.
+- Two gateway instances share the same Redis counters.
+- A denied layer does not consume the other limit dimensions.
 - Redis/KMS/database outages return stable retryable or non-retryable errors
   without secrets or internal details.

@@ -1,6 +1,6 @@
 # API 开放平台 MVP 整体方案与实施蓝图
 
-> 状态：Approved；Gate 0、FlowValidator、HMAC v1 验签/防重放、Servlet Filter、Spring Boot 运行时、AWS KMS、数据库最小权限验证、应用/API 授权、pre-auth 限流、Publication Guard、PostgreSQL 基础迁移均已 GREEN。
+> 状态：Approved；Gate 0、FlowValidator、HMAC v1 验签/防重放、Servlet Filter、Spring Boot 运行时、AWS KMS、数据库最小权限验证、应用/API 授权、pre/post-auth 限流、应用/API 日/月配额、Publication Guard、PostgreSQL 基础迁移均已本地 GREEN；真实 staging 尚未执行。
 >
 > 范围：整体方案、数据模型、编排 DSL、安全基线、技术选型与实施切片。
 >
@@ -857,7 +857,7 @@ TDD Gate 0：先将上述接口固化为 OpenAPI 3.1，补充每个操作的请�
 
 S4 当前已完成 HMAC 黄金向量、签名验证、时间窗、Nonce 防重放、Servlet Filter、请求体上限、统一错误映射、Spring Boot 启动器、数据库凭证解析、AWS KMS 解密、最小权限角色验证和应用/API 精确路由授权。剩余路由模板解析和单一 API 代理。
 
-S5 当前已完成 pre-auth 每 IP Redis 固定窗口限流与 429/503 契约。剩余可信代理 IP 提取、应用/API post-auth 限流、日/月配额和多实例负载验证。
+S5 当前已完成 pre-auth 每 IP Redis 固定窗口限流，以及应用/API token bucket 与 UTC 日/月调用配额。Post-auth 六维检查由单条 Redis Lua 原子执行，任一维度拒绝时不消耗其它额度；策略表含 RLS、租户归属校验和受限解析函数。剩余可信代理 IP 提取、真实 staging 多实例负载/边界验证、Redis Cluster 方案和基于 usage 的配额对账。
 
 ## 13. 已确认默认决策
 
@@ -877,6 +877,7 @@ S5 当前已完成 pre-auth 每 IP Redis 固定窗口限流与 429/503 契约。
 ## 14. Handoff
 
 - 当前状态：方案与默认决策已确认；Gate 0、FlowValidator、HMAC verifier/replay、Servlet Filter、Spring Boot 运行时、AWS KMS decryptor、JDBC credential resolver、数据库角色验证、应用/API 授权、pre-auth 限流、Publication Guard 和 PostgreSQL 基础迁移均已通过 `mvn verify`。
-- 当前部署边界：本地嵌入式 Tomcat/PostgreSQL/Redis 端到端链路已成立，但真实 staging AWS KMS/数据库角色/Redis TLS、可信代理 IP、post-auth 配额、路由模板和代理/编排执行尚未完成。
-- 下一 TDD 切片：staging 依赖与可信代理验证，然后实现应用/API post-auth token bucket、日/月配额，再进入路由模板和单一 API 代理。
+- 当前部署边界：本地嵌入式 Tomcat/PostgreSQL/Redis 端到端链路、受限数据库角色和应用/API 配额已成立，但真实 staging AWS KMS/数据库角色/Redis TLS、可信代理 IP、Redis Cluster、usage 对账、路由模板和代理/编排执行尚未完成。
+- Staging 安排：`scripts/staging-security-smoke.ps1` 已提供 valid、replay、token bucket、日配额和月配额场景；当前机器无 staging URL、Secret、AWS/Redis/PostgreSQL CLI 或凭据，真实执行状态明确为 NOT EXECUTED。
+- 下一 TDD 切片：在具备凭据的 staging 环境执行安全 smoke 与双实例负载，然后实现 usage/audit 持久化与配额对账，再进入路由模板和单一 API 代理。
 - 每次切片继续执行 RED -> GREEN -> Coverage -> Security/Docs checkpoint；`mvn verify` 是统一验证命令。
