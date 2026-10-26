@@ -99,6 +99,28 @@ class RedisPreAuthRateLimiterTest {
         assertFalse(exception.getMessage().contains("redis down"));
     }
 
+    @Test
+    void rejectsSubMillisecondAndNonPositiveWindows() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new RedisPreAuthRateLimiter(
+                        jedis,
+                        2,
+                        Duration.ofNanos(1),
+                        Clock.fixed(NOW, ZoneOffset.UTC)
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new RedisPreAuthRateLimiter(
+                        jedis,
+                        2,
+                        Duration.ZERO,
+                        Clock.fixed(NOW, ZoneOffset.UTC)
+                )
+        );
+    }
+
     private RedisPreAuthRateLimiter limiter(JedisPooled client) {
         return new RedisPreAuthRateLimiter(
                 client,
