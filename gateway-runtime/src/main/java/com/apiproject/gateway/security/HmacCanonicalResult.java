@@ -10,4 +10,9 @@ public record HmacCanonicalResult(
         Objects.requireNonNull(canonicalString, "canonicalString");
         Objects.requireNonNull(signatureHex, "signatureHex");
     }
+
+    @Override
+    public String toString() {
+        return "HmacCanonicalResult[redacted]";
+    }
 }

@@ -29,6 +29,7 @@ public final class HmacCanonicalizer {
             Pattern.compile("^[A-Za-z0-9_-]{16,128}$");
     private static final Pattern NONCE_PATTERN =
             Pattern.compile("^[A-Za-z0-9_-]{16,128}$");
+    private static final int MIN_SECRET_BYTES = 32;
     private static final char[] HEX = "0123456789abcdef".toCharArray();
 
     private HmacCanonicalizer() {
@@ -42,8 +43,8 @@ public final class HmacCanonicalizer {
             HmacCanonicalRequest request,
             byte[] secret
     ) {
-        if (secret == null || secret.length == 0) {
-            throw invalid("INVALID_SECRET", "HMAC secret is required");
+        if (secret == null || secret.length < MIN_SECRET_BYTES) {
+            throw invalid("INVALID_SECRET", "HMAC secret must contain at least 256 bits");
         }
 
         String appKey = normalizeAppKey(request.appKey());
@@ -82,7 +83,9 @@ public final class HmacCanonicalizer {
     }
 
     private String normalizeMethod(String method) {
-        if (method == null || method.isBlank()) {
+        if (method == null
+                || method.isBlank()
+                || !method.equals(method.trim())) {
             throw invalid("INVALID_METHOD", "HTTP method is required");
         }
         String normalized = method.trim().toUpperCase(Locale.ROOT);
@@ -132,16 +135,28 @@ public final class HmacCanonicalizer {
             throw invalid("INVALID_HOST", "Unbracketed IPv6 host is invalid");
         }
         String hostName = firstColon < 0 ? normalized : normalized.substring(0, firstColon);
-        if (!hostName.matches("^[a-z0-9.-]+$")
-                || hostName.startsWith(".")
-                || hostName.endsWith(".")
-                || hostName.contains("..")) {
+        if (!isValidHostName(hostName)) {
             throw invalid("INVALID_HOST", "Host name is invalid");
         }
         if (firstColon < 0) {
             return hostName;
         }
         return appendNonDefaultPort(hostName, normalized.substring(firstColon + 1));
+    }
+
+    private boolean isValidHostName(String hostName) {
+        if (hostName.isEmpty() || hostName.length() > 253) {
+            return false;
+        }
+        String[] labels = hostName.split("\\.", -1);
+        for (String label : labels) {
+            if (label.isEmpty()
+                    || label.length() > 63
+                    || !label.matches("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private String appendNonDefaultPort(String host, String rawPort) {

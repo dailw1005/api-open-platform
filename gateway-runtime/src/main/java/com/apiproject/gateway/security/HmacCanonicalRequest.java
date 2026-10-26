@@ -27,4 +27,15 @@ public record HmacCanonicalRequest(
     public byte[] body() {
         return body.clone();
     }
+
+    @Override
+    public String toString() {
+        return "HmacCanonicalRequest["
+                + "appKey=" + appKey
+                + ", method=" + method
+                + ", host=" + host
+                + ", rawPath=" + rawPath
+                + ", timestampSeconds=" + timestampSeconds
+                + ']';
+    }
 }
