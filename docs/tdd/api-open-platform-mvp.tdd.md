@@ -151,4 +151,4 @@
 2. Enforce DSL byte, node, depth and cumulative runtime budgets at the service boundary.
 3. Add usage/request/audit partition migrations and provider-side OpenAPI response validation.
 
-**Self-check:** The 4.4 score reflects that the requested Gate 0 and first code slice are verifiably complete, while unimplemented MVP runtime features are explicitly identified.
+**Self-check:** The 4.4 score reflects that the requested HMAC, publication-guard and database slices are verifiably complete, while unimplemented gateway/runtime features are explicitly identified.
