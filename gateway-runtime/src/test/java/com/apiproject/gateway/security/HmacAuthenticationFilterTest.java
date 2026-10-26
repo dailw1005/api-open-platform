@@ -384,6 +384,33 @@ class HmacAuthenticationFilterTest {
     }
 
     @Test
+    void invalidStoredSecretReturns500WithoutLeakingInternals() throws Exception {
+        filter = filterWithResolver(nonceStore, appKey -> Optional.of(new byte[0]));
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        JsonNode error = assertError(
+                response,
+                chain,
+                500,
+                "INTERNAL_CONFIGURATION"
+        );
+        assertFalse(error.get("retryable").asBoolean());
+        assertFalse(response.getContentAsString().contains("secret"));
+    }
+
+    @Test
     void exactPublicApiPathIsProtected() throws Exception {
         MockHttpServletRequest request = signedRequest(
                 "GET",
