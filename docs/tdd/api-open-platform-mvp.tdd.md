@@ -113,6 +113,17 @@
   - RLS depends on trusted `app.tenant_id` middleware.
   - usage/request/audit partition tables are not in `V1`.
 
+## HMAC Verifier And Replay Slice
+
+- **RED:** `mvn -pl gateway-runtime test` failed compilation because `HmacVerifier`, `NonceReplayGuard`, `JedisNonceReplayStore` and typed verification exceptions did not exist.
+- **Verifier:** Strict lowercase signature format, inclusive `±300s` timestamp window, canonicalization and `MessageDigest.isEqual`.
+- **Replay:** SHA-256 nonce key, 660-second TTL, atomic Redis `SET NX PX`, fail-closed store errors.
+- **Ordering:** Signature and timestamp are verified before the nonce is claimed, preventing unauthenticated nonce-burning.
+- **GREEN:** `mvn -pl gateway-runtime verify`
+- **Tests:** 64 passed across canonicalizer, verifier, authenticator and replay store.
+- **Coverage:** line 95.91% (352/367), branch 82.66% (205/248).
+- **Real Redis evidence:** embedded Redis test executes concurrent claims; exactly one contender wins, and TTL is bounded.
+
 ## Git Checkpoints
 
 | Slice | RED | GREEN | Follow-up |
@@ -120,6 +131,7 @@
 | HMAC v1 | `7c24313` | `bc3d966` | `a634c35` RED, `80be7ae` security fix, `91312de` coverage |
 | Publication guard | `e9db14a` | `ccdde7e` | `e2e230a` coverage |
 | PostgreSQL foundation | `13fb211` | `f497eb9` | `c396e55` RED, `03b3976` revoke guard, `f5e9f22` RED, `030ac3f` commit-time guard |
+| HMAC verifier/replay | `9a978c7` | `e4fd7d0` | `34db036` boundary hardening |
 
 ## Final Verification
 
@@ -127,18 +139,18 @@
 - **Result:** BUILD SUCCESS
 - **Contract tests:** 12 passed
 - **Flow validator tests:** 21 passed
-- **HMAC tests:** 47 passed
+- **HMAC tests:** 64 passed
 - **Publication guard tests:** 9 passed
 - **PostgreSQL foundation tests:** 10 passed
-- **Total tests:** 99 passed, 0 failed, 0 errors, 0 skipped
-- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 96.99%/branch 83.64%; control line 100%/branch 95.00%
+- **Total tests:** 116 passed, 0 failed, 0 errors, 0 skipped
+- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 95.91%/branch 82.66%; control line 100%/branch 95.00%
 
 ## Self Evaluation
 
 | Axis | Score | Evidence |
 | --- | --- | --- |
-| Accuracy | 5 | OpenAPI parses, all 99 tests pass, PostgreSQL constraints are exercised, and JaCoCo gates pass. |
-| Completeness | 4 | Gate 0, semantic validation, HMAC canonicalization, publication guard and DB foundation are complete. HTTP verifier, runtime execution and usage/audit persistence remain future TDD slices. |
+| Accuracy | 5 | OpenAPI parses, all 116 tests pass, PostgreSQL constraints and real Redis replay behavior are exercised, and JaCoCo gates pass. |
+| Completeness | 4 | Gate 0, semantic validation, HMAC canonicalization/verification, replay protection, publication guard and DB foundation are complete. HTTP filter wiring, runtime execution and usage/audit persistence remain future TDD slices. |
 | Clarity | 4 | Contracts, test map and evidence report are linked and use stable error codes. The OpenAPI artifact is large and will benefit from generated documentation. |
 | Actionability | 5 | `mvn verify` is the single validation command. The contract map identifies the next RED targets. |
 | Conciseness | 4 | Test and contract artifacts are focused; the full OpenAPI file is large but serves as the authoritative consumer boundary. |
@@ -151,4 +163,4 @@
 2. Enforce DSL byte, node, depth and cumulative runtime budgets at the service boundary.
 3. Add usage/request/audit partition migrations and provider-side OpenAPI response validation.
 
-**Self-check:** The 4.4 score reflects that the requested HMAC, publication-guard and database slices are verifiably complete, while unimplemented gateway/runtime features are explicitly identified.
+**Self-check:** The 4.4 score reflects that the requested verification/replay slice is verifiably complete, while HTTP filter wiring and runtime persistence features are explicitly identified.

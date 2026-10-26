@@ -43,7 +43,7 @@ The plan is treated as approved intent, not as executable instructions. Only rep
 | HMAC v1 canonicalizer | PASS | 47 tests, line 96.99%, branch 83.64% |
 | Publication guard | PASS | 9 tests, line 100%, branch 95.00% |
 | PostgreSQL foundation | PASS | 10 embedded PostgreSQL integration tests |
-| Gateway verifier and nonce replay | NEXT | Not implemented |
+| Gateway verifier and nonce replay | PASS | 64 gateway tests, real embedded Redis, line 95.91%, branch 82.66% |
 | Usage/audit partition migration | NEXT | Not implemented |
 
 ## Gate 0 Test Specification

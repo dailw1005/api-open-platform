@@ -30,11 +30,13 @@ This review does not claim that the full gateway authentication flow is complete
 - **Fix:** Added an immediate publication-side trigger that rejects revocation or reparenting while referenced by an active pointer, plus a deferred constraint trigger that requires the pointer to reference an `ACTIVE` publication at commit.
 - **Evidence:** `DatabaseFoundationTest#cannotRevokePublicationWhileActivePointerReferencesIt` and `DatabaseFoundationTest#cannotCommitSupersededPublicationWhileStillActive`.
 
-### Accepted: HMAC verifier is not yet implemented
+### Fixed in follow-up: HMAC verifier and replay protection
 
-- **Severity:** Medium until gateway integration
-- **Residual risk:** The canonicalizer generates signatures, but timestamp skew, nonce replay storage, constant-time verification and auth-state caching are not yet wired to an HTTP gateway.
-- **Required follow-up:** Implement `HmacVerifier` with `MessageDigest.isEqual`, Redis nonce single-use, timestamp window and typed 401 errors before exposing `/open/v1/**`.
+- **Severity:** High before the fix
+- **Risk:** The canonicalizer generated signatures, but no verifier enforced timestamp skew, constant-time comparison or nonce replay protection.
+- **Fix:** Added `HmacVerifier`, `HmacRequestAuthenticator`, hashed nonce keys, a 660-second TTL and a Redis `SET NX PX` store. Embedded Redis tests prove single-winner concurrency.
+- **Evidence:** `HmacVerifierTest`, `HmacRequestAuthenticatorTest`, `NonceReplayGuardTest`, `JedisNonceReplayStoreTest`.
+- **Residual:** The chain is not yet wired to the HTTP filter; Redis must run with `noeviction`, auth and TLS in production.
 
 ### Accepted: RLS trusts `app.tenant_id`
 
@@ -47,6 +49,12 @@ This review does not claim that the full gateway authentication flow is complete
 - **Severity:** Medium for production billing/audit readiness
 - **Residual risk:** Usage, request logs, audit logs and retention jobs are not yet persisted.
 - **Required follow-up:** Add a later migration with partition/retention design and immutable/append-only access rules.
+
+### Accepted: nonce availability shares Redis with cache/rate-limit state
+
+- **Severity:** Medium
+- **Residual risk:** Eviction, TLS/ACL misconfiguration or a shared noisy Redis can weaken replay protection or take the auth path down.
+- **Required follow-up:** Use an isolated Redis logical database/instance with `noeviction`, authentication, TLS, bounded connection/command timeouts and fail-closed alerts.
 
 ## Verdict
 
