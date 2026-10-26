@@ -411,6 +411,74 @@ class HmacAuthenticationFilterTest {
     }
 
     @Test
+    void typedInternalCredentialFailureReturns500WithoutLeakingDetails() throws Exception {
+        filter = filterWithResolver(nonceStore, appKey -> {
+            throw new CredentialResolutionException(
+                    "INTERNAL_CONFIGURATION",
+                    false,
+                    "kms decryption failed",
+                    null
+            );
+        });
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        JsonNode error = assertError(
+                response,
+                chain,
+                500,
+                "INTERNAL_CONFIGURATION"
+        );
+        assertFalse(error.get("retryable").asBoolean());
+        assertFalse(response.getContentAsString().contains("decryption"));
+    }
+
+    @Test
+    void typedCredentialStoreFailureReturnsRetryable503() throws Exception {
+        filter = filterWithResolver(nonceStore, appKey -> {
+            throw new CredentialResolutionException(
+                    "CREDENTIAL_STORE_UNAVAILABLE",
+                    true,
+                    "database unavailable",
+                    null
+            );
+        });
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        JsonNode error = assertError(
+                response,
+                chain,
+                503,
+                "CREDENTIAL_STORE_UNAVAILABLE"
+        );
+        assertTrue(error.get("retryable").asBoolean());
+        assertFalse(response.getContentAsString().contains("database"));
+    }
+
+    @Test
     void exactPublicApiPathIsProtected() throws Exception {
         MockHttpServletRequest request = signedRequest(
                 "GET",
