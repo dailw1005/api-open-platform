@@ -806,6 +806,8 @@ class HmacAuthenticationFilterTest {
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
+        filter.doFilter(request, response, chain);
+
         assertError(response, chain, 429, "QUOTA_EXCEEDED");
         assertEquals("1000", response.getHeader("X-RateLimit-Limit"));
         assertEquals("3600", response.getHeader("Retry-After"));
@@ -832,6 +834,8 @@ class HmacAuthenticationFilterTest {
         );
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
 
         JsonNode error = assertError(
                 response,

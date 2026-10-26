@@ -48,6 +48,8 @@ class DatabaseFoundationTest {
             "app",
             "app_credential",
             "app_api_grant",
+            "rate_limit_policy",
+            "quota_policy",
             "orchestration",
             "orchestration_version",
             "idempotency_record",

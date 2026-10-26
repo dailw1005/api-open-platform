@@ -57,6 +57,7 @@ public final class HmacAuthenticationFilter implements Filter {
     private final Clock clock;
     private final ApiAuthorizationGate authorizationGate;
     private final PreAuthRateLimiter preAuthRateLimiter;
+    private final PostAuthLimitGate postAuthLimitGate;
 
     public HmacAuthenticationFilter(
             ActiveCredentialResolver credentialResolver,
@@ -64,7 +65,8 @@ public final class HmacAuthenticationFilter implements Filter {
             ObjectMapper objectMapper,
             Clock clock,
             ApiAuthorizationGate authorizationGate,
-            PreAuthRateLimiter preAuthRateLimiter
+            PreAuthRateLimiter preAuthRateLimiter,
+            PostAuthLimitGate postAuthLimitGate
     ) {
         this.credentialResolver = Objects.requireNonNull(
                 credentialResolver,
@@ -80,6 +82,10 @@ public final class HmacAuthenticationFilter implements Filter {
         this.preAuthRateLimiter = Objects.requireNonNull(
                 preAuthRateLimiter,
                 "preAuthRateLimiter"
+        );
+        this.postAuthLimitGate = Objects.requireNonNull(
+                postAuthLimitGate,
+                "postAuthLimitGate"
         );
     }
 
@@ -147,6 +153,19 @@ public final class HmacAuthenticationFilter implements Filter {
                     request.getMethod(),
                     request.getRequestURI()
             );
+            PostAuthRateLimitDecision postAuthDecision =
+                    postAuthLimitGate.check(authorizedApi);
+            writeRateLimitHeaders(response, postAuthDecision);
+            if (!postAuthDecision.allowed()) {
+                writeError(
+                        response,
+                        requestId,
+                        429,
+                        postAuthDecision.failureCode(),
+                        true
+                );
+                return;
+            }
             authenticatedRequest.setAttribute(
                     AUTHORIZED_API_ATTRIBUTE,
                     authorizedApi
@@ -158,6 +177,15 @@ public final class HmacAuthenticationFilter implements Filter {
                     exception.status,
                     exception.code,
                     exception.retryable
+            );
+            return;
+        } catch (PostAuthRateLimitException exception) {
+            writeError(
+                    response,
+                    requestId,
+                    exception.retryable() ? 503 : 500,
+                    exception.code(),
+                    exception.retryable()
             );
             return;
         } catch (ApiAuthorizationException exception) {
@@ -442,6 +470,30 @@ public final class HmacAuthenticationFilter implements Filter {
         }
     }
 
+    private void writeRateLimitHeaders(
+            HttpServletResponse response,
+            PostAuthRateLimitDecision decision
+    ) {
+        response.setHeader(
+                "X-RateLimit-Limit",
+                Long.toString(decision.limit())
+        );
+        response.setHeader(
+                "X-RateLimit-Remaining",
+                Long.toString(decision.remaining())
+        );
+        response.setHeader(
+                "X-RateLimit-Reset",
+                Long.toString(decision.resetAfterSeconds())
+        );
+        if (!decision.allowed()) {
+            response.setHeader(
+                    "Retry-After",
+                    Long.toString(decision.retryAfterSeconds())
+            );
+        }
+    }
+
     private String messageFor(String code) {
         return switch (code) {
             case "REQUEST_TOO_LARGE" -> "Request body is too large";
@@ -465,6 +517,7 @@ public final class HmacAuthenticationFilter implements Filter {
             case "AUTHORIZATION_STORE_UNAVAILABLE" ->
                     "Authorization service is unavailable";
             case "RATE_LIMITED" -> "Request rate limit exceeded";
+            case "QUOTA_EXCEEDED" -> "Request quota exceeded";
             case "RATE_LIMIT_UNAVAILABLE" ->
                     "Rate limiting service is unavailable";
             default -> "Authentication failed";

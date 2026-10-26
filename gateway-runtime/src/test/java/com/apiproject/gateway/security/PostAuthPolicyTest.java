@@ -22,6 +22,10 @@ class PostAuthPolicyTest {
         );
         assertThrows(
                 IllegalArgumentException.class,
+                () -> new TokenBucketPolicy(10, null, 10)
+        );
+        assertThrows(
+                IllegalArgumentException.class,
                 () -> new TokenBucketPolicy(10, Duration.ofMinutes(1), 0)
         );
     }
@@ -77,5 +81,162 @@ class PostAuthPolicyTest {
 
         assertEquals(appId, api.appId());
         assertEquals(apiId, api.apiId());
+    }
+
+    @Test
+    void decisionRejectsInvalidFailureAndRetryCombinations() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitDecision(
+                        true,
+                        "RATE_LIMITED",
+                        10,
+                        9,
+                        60,
+                        0
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitDecision(
+                        false,
+                        null,
+                        10,
+                        0,
+                        60,
+                        60
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitDecision(
+                        false,
+                        "UNKNOWN",
+                        10,
+                        0,
+                        60,
+                        60
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitDecision(
+                        true,
+                        null,
+                        10,
+                        9,
+                        60,
+                        1
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitDecision(
+                        false,
+                        "RATE_LIMITED",
+                        10,
+                        0,
+                        60,
+                        0
+                )
+        );
+    }
+
+    @Test
+    void decisionRejectsInvalidNumericValues() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitDecision(
+                        true,
+                        null,
+                        0,
+                        0,
+                        60,
+                        0
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitDecision(
+                        true,
+                        null,
+                        10,
+                        11,
+                        60,
+                        0
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitDecision(
+                        true,
+                        null,
+                        10,
+                        9,
+                        0,
+                        0
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitDecision(
+                        false,
+                        "RATE_LIMITED",
+                        10,
+                        0,
+                        60,
+                        -1
+                )
+        );
+    }
+
+    @Test
+    void exceptionOnlyAllowsStableFailureMappings() {
+        PostAuthRateLimitException unavailable =
+                new PostAuthRateLimitException(
+                        "RATE_LIMIT_UNAVAILABLE",
+                        true,
+                        "unavailable",
+                        null
+                );
+        PostAuthRateLimitException configuration =
+                new PostAuthRateLimitException(
+                        "INTERNAL_CONFIGURATION",
+                        false,
+                        "configuration",
+                        null
+                );
+
+        assertEquals("RATE_LIMIT_UNAVAILABLE", unavailable.code());
+        assertEquals(true, unavailable.retryable());
+        assertEquals("INTERNAL_CONFIGURATION", configuration.code());
+        assertEquals(false, configuration.retryable());
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitException(
+                        "RATE_LIMIT_UNAVAILABLE",
+                        false,
+                        "invalid",
+                        null
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitException(
+                        "INTERNAL_CONFIGURATION",
+                        true,
+                        "invalid",
+                        null
+                )
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new PostAuthRateLimitException(
+                        "UNKNOWN",
+                        true,
+                        "invalid",
+                        null
+                )
+        );
     }
 }

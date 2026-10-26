@@ -4,6 +4,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 public record AuthorizedApi(
+        UUID appId,
         UUID apiId,
         UUID apiVersionId,
         UUID tenantId,
@@ -11,6 +12,7 @@ public record AuthorizedApi(
 ) {
 
     public AuthorizedApi {
+        Objects.requireNonNull(appId, "appId");
         Objects.requireNonNull(apiId, "apiId");
         Objects.requireNonNull(apiVersionId, "apiVersionId");
         Objects.requireNonNull(tenantId, "tenantId");

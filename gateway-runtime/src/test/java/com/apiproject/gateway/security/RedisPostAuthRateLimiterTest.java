@@ -7,10 +7,7 @@ import redis.clients.jedis.JedisPooled;
 import redis.embedded.RedisServer;
 
 import java.net.ServerSocket;
-import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -24,7 +21,6 @@ import static org.mockito.Mockito.when;
 
 class RedisPostAuthRateLimiterTest {
 
-    private static final Instant NOW = Instant.parse("2026-10-26T03:00:00Z");
     private static final TokenBucketPolicy HIGH_RATE = new TokenBucketPolicy(
             10_000,
             Duration.ofMinutes(1),
@@ -113,7 +109,10 @@ class RedisPostAuthRateLimiterTest {
 
         assertTrue(limiter.check(api, blockedByApi).allowed());
         assertFalse(limiter.check(api, blockedByApi).allowed());
-        assertTrue(limiter.check(api, apiRelaxed).allowed());
+        assertTrue(
+                limiter.check(authorizedApiWithSameApp(api), apiRelaxed)
+                        .allowed()
+        );
     }
 
     @Test
@@ -146,10 +145,12 @@ class RedisPostAuthRateLimiterTest {
     }
 
     @Test
-    void apiQuotaIsSharedAcrossApplications() {
+    void apiQuotaIsSharedAcrossApplicationsAndTenants() {
         RedisPostAuthRateLimiter limiter = limiter(jedis);
         AuthorizedApi firstApp = authorizedApi();
-        AuthorizedApi secondApp = authorizedApiWithSameApi(firstApp);
+        AuthorizedApi secondApp = authorizedApiWithSameApiDifferentTenant(
+                firstApp
+        );
         PostAuthPolicy policy = policy(
                 HIGH_RATE,
                 HIGH_RATE,
@@ -206,10 +207,7 @@ class RedisPostAuthRateLimiterTest {
     }
 
     private RedisPostAuthRateLimiter limiter(JedisPooled client) {
-        return new RedisPostAuthRateLimiter(
-                client,
-                Clock.fixed(NOW, ZoneOffset.UTC)
-        );
+        return new RedisPostAuthRateLimiter(client);
     }
 
     private AuthorizedApi authorizedApi() {
@@ -222,11 +220,23 @@ class RedisPostAuthRateLimiterTest {
         );
     }
 
-    private AuthorizedApi authorizedApiWithSameApi(AuthorizedApi source) {
+    private AuthorizedApi authorizedApiWithSameApiDifferentTenant(
+            AuthorizedApi source
+    ) {
         return new AuthorizedApi(
                 UUID.randomUUID(),
                 source.apiId(),
                 source.apiVersionId(),
+                UUID.randomUUID(),
+                source.visibility()
+        );
+    }
+
+    private AuthorizedApi authorizedApiWithSameApp(AuthorizedApi source) {
+        return new AuthorizedApi(
+                source.appId(),
+                UUID.randomUUID(),
+                UUID.randomUUID(),
                 source.tenantId(),
                 source.visibility()
         );

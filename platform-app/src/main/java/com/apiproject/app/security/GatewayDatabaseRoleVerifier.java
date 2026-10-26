@@ -26,6 +26,11 @@ public final class GatewayDatabaseRoleVerifier {
                     'public.auth_authorize_public_api(text,text,text)',
                     'EXECUTE'
                 ),
+                has_function_privilege(
+                    current_user,
+                    'public.auth_resolve_post_auth_policies(uuid,uuid)',
+                    'EXECUTE'
+                ),
                 has_table_privilege(
                     current_user,
                     'public.app_credential',
@@ -54,7 +59,8 @@ public final class GatewayDatabaseRoleVerifier {
             boolean bypassRls = resultSet.getBoolean(3);
             boolean credentialFunctionExecute = resultSet.getBoolean(4);
             boolean authorizationFunctionExecute = resultSet.getBoolean(5);
-            boolean directCredentialAccess = resultSet.getBoolean(6);
+            boolean policyFunctionExecute = resultSet.getBoolean(6);
+            boolean directCredentialAccess = resultSet.getBoolean(7);
 
             if (superuser) {
                 throw configurationError(
@@ -76,6 +82,11 @@ public final class GatewayDatabaseRoleVerifier {
                         "Gateway database role lacks authorization EXECUTE"
                 );
             }
+            if (!policyFunctionExecute) {
+                throw configurationError(
+                        "Gateway database role lacks post-auth policy EXECUTE"
+                );
+            }
             if (directCredentialAccess) {
                 throw configurationError(
                         "Gateway database role has sensitive table privileges"
@@ -85,6 +96,7 @@ public final class GatewayDatabaseRoleVerifier {
                     roleName,
                     credentialFunctionExecute,
                     authorizationFunctionExecute,
+                    policyFunctionExecute,
                     superuser,
                     bypassRls,
                     directCredentialAccess

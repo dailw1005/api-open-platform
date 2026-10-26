@@ -230,6 +230,18 @@ class RuntimeHmacIntegrationTest {
                 """,
                 appId
         );
+        assertEquals(
+                1L,
+                ADMIN_JDBC.queryForObject(
+                        """
+                        SELECT app_daily_quota
+                        FROM auth_resolve_post_auth_policies(?, ?)
+                        """,
+                        Long.class,
+                        appId,
+                        PROBE_API_ID
+                )
+        );
 
         assertEquals(200, signedProbe(appKey).statusCode());
         HttpResponse<String> denied = signedProbe(appKey);

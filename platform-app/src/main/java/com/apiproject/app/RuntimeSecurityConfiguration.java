@@ -4,6 +4,7 @@ import com.apiproject.app.security.CredentialSecretDecryptor;
 import com.apiproject.app.security.GatewayDatabaseRoleVerifier;
 import com.apiproject.app.security.JdbcApiAuthorizationGate;
 import com.apiproject.app.security.JdbcActiveCredentialResolver;
+import com.apiproject.app.security.JdbcPostAuthPolicyResolver;
 import com.apiproject.gateway.security.ActiveCredentialResolver;
 import com.apiproject.gateway.security.ApiAuthorizationGate;
 import com.apiproject.gateway.security.HmacAuthenticationFilter;
@@ -12,7 +13,12 @@ import com.apiproject.gateway.security.HmacVerifier;
 import com.apiproject.gateway.security.JedisNonceReplayStore;
 import com.apiproject.gateway.security.NonceReplayGuard;
 import com.apiproject.gateway.security.NonceReplayStore;
+import com.apiproject.gateway.security.PolicyPostAuthLimitGate;
+import com.apiproject.gateway.security.PostAuthLimitGate;
+import com.apiproject.gateway.security.PostAuthPolicyResolver;
+import com.apiproject.gateway.security.PostAuthRateLimiter;
 import com.apiproject.gateway.security.PreAuthRateLimiter;
+import com.apiproject.gateway.security.RedisPostAuthRateLimiter;
 import com.apiproject.gateway.security.RedisPreAuthRateLimiter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.ApplicationRunner;
@@ -31,7 +37,8 @@ import java.time.Clock;
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties({
         GatewaySecurityProperties.class,
-        PreAuthRateLimitProperties.class
+        PreAuthRateLimitProperties.class,
+        PostAuthLimitProperties.class
 })
 public class RuntimeSecurityConfiguration {
 
@@ -81,6 +88,27 @@ public class RuntimeSecurityConfiguration {
     }
 
     @Bean
+    PostAuthPolicyResolver postAuthPolicyResolver(
+            DataSource dataSource,
+            PostAuthLimitProperties properties
+    ) {
+        return new JdbcPostAuthPolicyResolver(dataSource, properties);
+    }
+
+    @Bean
+    PostAuthRateLimiter postAuthRateLimiter(JedisPooled jedis) {
+        return new RedisPostAuthRateLimiter(jedis);
+    }
+
+    @Bean
+    PostAuthLimitGate postAuthLimitGate(
+            PostAuthPolicyResolver policyResolver,
+            PostAuthRateLimiter rateLimiter
+    ) {
+        return new PolicyPostAuthLimitGate(policyResolver, rateLimiter);
+    }
+
+    @Bean
     GatewayDatabaseRoleVerifier gatewayDatabaseRoleVerifier(DataSource dataSource) {
         return new GatewayDatabaseRoleVerifier(dataSource);
     }
@@ -111,7 +139,8 @@ public class RuntimeSecurityConfiguration {
             ObjectMapper objectMapper,
             Clock clock,
             ApiAuthorizationGate authorizationGate,
-            PreAuthRateLimiter preAuthRateLimiter
+            PreAuthRateLimiter preAuthRateLimiter,
+            PostAuthLimitGate postAuthLimitGate
     ) {
         FilterRegistrationBean<HmacAuthenticationFilter> registration =
                 new FilterRegistrationBean<>();
@@ -122,7 +151,8 @@ public class RuntimeSecurityConfiguration {
                 objectMapper,
                 clock,
                 authorizationGate,
-                preAuthRateLimiter
+                preAuthRateLimiter,
+                postAuthLimitGate
         ));
         registration.addUrlPatterns("/*");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 20);

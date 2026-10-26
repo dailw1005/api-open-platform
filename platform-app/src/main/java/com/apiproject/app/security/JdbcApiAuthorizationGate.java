@@ -15,7 +15,7 @@ import java.util.UUID;
 public final class JdbcApiAuthorizationGate implements ApiAuthorizationGate {
 
     private static final String AUTHORIZATION_SQL = """
-            SELECT decision, api_id, api_version_id, tenant_id, visibility
+            SELECT decision, app_id, api_id, api_version_id, tenant_id, visibility
             FROM auth_authorize_public_api(?, ?, ?)
             """;
 
@@ -49,6 +49,7 @@ public final class JdbcApiAuthorizationGate implements ApiAuthorizationGate {
                     throw decisionFailure(decision);
                 }
 
+                UUID appId = resultSet.getObject("app_id", UUID.class);
                 UUID apiId = resultSet.getObject("api_id", UUID.class);
                 UUID apiVersionId = resultSet.getObject(
                         "api_version_id",
@@ -56,7 +57,8 @@ public final class JdbcApiAuthorizationGate implements ApiAuthorizationGate {
                 );
                 UUID tenantId = resultSet.getObject("tenant_id", UUID.class);
                 String visibility = resultSet.getString("visibility");
-                if (apiId == null
+                if (appId == null
+                        || apiId == null
                         || apiVersionId == null
                         || tenantId == null
                         || visibility == null) {
@@ -72,6 +74,7 @@ public final class JdbcApiAuthorizationGate implements ApiAuthorizationGate {
                     );
                 }
                 return new AuthorizedApi(
+                        appId,
                         apiId,
                         apiVersionId,
                         tenantId,

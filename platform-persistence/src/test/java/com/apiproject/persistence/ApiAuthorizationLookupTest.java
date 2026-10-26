@@ -161,6 +161,33 @@ class ApiAuthorizationLookupTest {
     }
 
     @Test
+    void ignoresApplicationPolicyOwnedByAnotherTenant() throws Exception {
+        Fixture fixture = insertFixture("PLATFORM_PUBLIC", true, "ACTIVE");
+        UUID otherTenantId = UUID.randomUUID();
+        String suffix = otherTenantId.toString().substring(0, 8);
+        try (Connection connection = dataSource.getConnection()) {
+            insertTenant(connection, otherTenantId, suffix);
+        }
+        insertRateLimitPolicy(
+                otherTenantId,
+                "APP",
+                fixture.appId(),
+                30,
+                60,
+                6
+        );
+
+        EffectivePolicy policy = resolvePolicies(
+                fixture.appId(),
+                fixture.apiId()
+        );
+
+        assertNull(policy.appRateRequests());
+        assertNull(policy.appRateWindowSeconds());
+        assertNull(policy.appRateBurst());
+    }
+
+    @Test
     void missingOrRevokedGrantReturnsApiNotGranted() throws Exception {
         Fixture missing = insertFixture("PLATFORM_PUBLIC", false, "ACTIVE");
         Fixture revoked = insertFixture("PLATFORM_PUBLIC", true, "REVOKED");
