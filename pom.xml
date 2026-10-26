@@ -13,6 +13,7 @@
         <module>platform-contract</module>
         <module>orchestration-engine</module>
         <module>gateway-runtime</module>
+        <module>platform-control</module>
     </modules>
 
     <properties>

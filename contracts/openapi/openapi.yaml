@@ -944,7 +944,7 @@ paths:
       x-tenant-scope: GLOBAL
       x-csrf-required: true
       x-idempotency: REQUIRED
-      x-state-transition: ACTIVE->ROLLED_BACK
+      x-state-transition: ACTIVE->SUPERSEDED; SUPERSEDED->ACTIVE
       x-contract-version: "1"
       parameters:
         - $ref: "#/components/parameters/IdempotencyKeyRequired"
@@ -3320,13 +3320,22 @@ components:
           const: PROD
         status:
           type: string
-          enum: [ACTIVE, ROLLED_BACK]
+          enum: [PREPARED, ACTIVE, SUPERSEDED, REVOKED]
+          description: >
+            PREPARED may be published, ACTIVE or SUPERSEDED may be activated by
+            rollback, and REVOKED may never become the production pointer.
         manifestChecksum:
           type: string
           pattern: "^[0-9a-f]{64}$"
         publishedAt:
           type: string
           format: date-time
+      x-publication-guard-rules:
+        - environment must equal PROD
+        - apiId must match the API definition
+        - ownerTenantId must match the API definition
+        - visibility must match the API definition
+        - REVOKED publications cannot be activated
     ScopeType:
       type: string
       enum: [PLATFORM, TENANT, APP, API]
