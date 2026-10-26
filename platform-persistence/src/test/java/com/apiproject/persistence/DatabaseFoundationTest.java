@@ -277,6 +277,40 @@ class DatabaseFoundationTest {
     }
 
     @Test
+    void cannotRevokePublicationWhileActivePointerReferencesIt() throws Exception {
+        UUID tenant = UUID.randomUUID();
+        UUID user = UUID.randomUUID();
+        UUID api = UUID.randomUUID();
+        UUID version = UUID.randomUUID();
+        UUID publication = UUID.randomUUID();
+
+        try (Connection connection = dataSource.getConnection()) {
+            insertTenant(connection, tenant, "revoke-active");
+            insertUserAndRole(connection, tenant, user, "revoke@example.com", "APP_DEVELOPER");
+            insertApiDefinition(connection, tenant, api, "revoke-api", "/v1/revoke");
+            insertApiVersion(connection, api, user, version);
+            insertPublicationWithId(
+                    connection,
+                    publication,
+                    api,
+                    tenant,
+                    version,
+                    user,
+                    "PROD",
+                    "ACTIVE",
+                    1
+            );
+            activatePublication(connection, api, publication);
+
+            SQLException exception = assertThrows(
+                    SQLException.class,
+                    () -> revokePublication(connection, publication)
+            );
+            assertEquals("23514", exception.getSQLState());
+        }
+    }
+
+    @Test
     void rejectsNonProductionPublication() throws Exception {
         UUID tenant = UUID.randomUUID();
         UUID user = UUID.randomUUID();
@@ -550,6 +584,18 @@ class DatabaseFoundationTest {
                 """)) {
             statement.setObject(1, publication);
             statement.setObject(2, api);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void revokePublication(Connection connection, UUID publication)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE api_publication
+                SET status = 'REVOKED'
+                WHERE id = ?
+                """)) {
+            statement.setObject(1, publication);
             statement.executeUpdate();
         }
     }
