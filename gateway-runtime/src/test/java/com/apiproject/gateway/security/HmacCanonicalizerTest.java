@@ -1,8 +1,12 @@
 package com.apiproject.gateway.security;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.nio.charset.StandardCharsets;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -276,6 +280,77 @@ class HmacCanonicalizerTest {
         assertFalse(result.toString().contains(result.canonicalString()));
     }
 
+    @ParameterizedTest
+    @MethodSource("invalidCanonicalInputs")
+    void rejectsInvalidCanonicalInputs(
+            HmacCanonicalRequest request,
+            String expectedCode
+    ) {
+        HmacCanonicalizationException exception = assertThrows(
+                HmacCanonicalizationException.class,
+                () -> canonicalizer.canonicalize(request, SECRET)
+        );
+
+        assertEquals(expectedCode, exception.code());
+    }
+
+    @Test
+    void canonicalizesUnicodePathReservedQueryAndHostPorts() {
+        HmacCanonicalRequest request = new HmacCanonicalRequest(
+                APP_KEY,
+                "GET",
+                "[::1]:8443",
+                "/v1/用户/%41%7e%3a",
+                "q=%26%3d%2b&z=1",
+                null,
+                1_760_000_000L,
+                NONCE,
+                bytes("")
+        );
+
+        HmacCanonicalResult result = canonicalizer.canonicalize(request, SECRET);
+        String[] lines = result.canonicalString().split("\n", -1);
+
+        assertEquals("[::1]:8443", lines[2]);
+        assertEquals("/v1/%E7%94%A8%E6%88%B7/A~%3A", lines[4]);
+        assertEquals("q=%26%3D%2B&z=1", lines[5]);
+    }
+
+    @Test
+    void removesDefaultHttpAndHttpsPorts() {
+        HmacCanonicalResult http = canonicalizer.canonicalize(
+                new HmacCanonicalRequest(
+                        APP_KEY,
+                        "GET",
+                        "api.example.com:80",
+                        "/v1/users",
+                        null,
+                        null,
+                        1_760_000_000L,
+                        NONCE,
+                        bytes("")
+                ),
+                SECRET
+        );
+        HmacCanonicalResult https = canonicalizer.canonicalize(
+                new HmacCanonicalRequest(
+                        APP_KEY,
+                        "GET",
+                        "api.example.com:443",
+                        "/v1/users",
+                        null,
+                        null,
+                        1_760_000_000L,
+                        NONCE,
+                        bytes("")
+                ),
+                SECRET
+        );
+
+        assertEquals("api.example.com", http.canonicalString().split("\n")[2]);
+        assertEquals("api.example.com", https.canonicalString().split("\n")[2]);
+    }
+
     private HmacCanonicalRequest requestWithPathAndQuery(String path, String query) {
         return new HmacCanonicalRequest(
                 APP_KEY,
@@ -287,6 +362,115 @@ class HmacCanonicalizerTest {
                 1_760_000_000L,
                 NONCE,
                 bytes("")
+        );
+    }
+
+    private static Stream<Arguments> invalidCanonicalInputs() {
+        return Stream.of(
+                Arguments.of(request("bad key", "GET", "api.example.com", "/v1/users"),
+                        "INVALID_APP_KEY"),
+                Arguments.of(request(APP_KEY, "TRACE", "api.example.com", "/v1/users"),
+                        "INVALID_METHOD"),
+                Arguments.of(request(APP_KEY, "GET", "", "/v1/users"),
+                        "INVALID_HOST"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com ", "/v1/users"),
+                        "INVALID_HOST"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com/evil", "/v1/users"),
+                        "INVALID_HOST"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com:abc", "/v1/users"),
+                        "INVALID_HOST"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com:0", "/v1/users"),
+                        "INVALID_HOST"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com:65536", "/v1/users"),
+                        "INVALID_HOST"),
+                Arguments.of(request(APP_KEY, "GET", "[::1", "/v1/users"),
+                        "INVALID_HOST"),
+                Arguments.of(request(APP_KEY, "GET", "[::1]x", "/v1/users"),
+                        "INVALID_HOST"),
+                Arguments.of(request(APP_KEY, "GET", "::1", "/v1/users"),
+                        "INVALID_HOST"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "v1/users"),
+                        "INVALID_PATH"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/users?x"),
+                        "INVALID_PATH"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/users#x"),
+                        "INVALID_PATH"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1\\users"),
+                        "INVALID_PATH"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/a b"),
+                        "INVALID_PATH"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/%"),
+                        "INVALID_PATH"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/%zz"),
+                        "INVALID_PATH"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/%00"),
+                        "INVALID_PATH"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/[x]"),
+                        "INVALID_PATH"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/users", "a=1&&b=2"),
+                        "INVALID_QUERY"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/users", "a=1#b"),
+                        "INVALID_QUERY"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/users", "a=1 b"),
+                        "INVALID_QUERY"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/users", "=1"),
+                        "INVALID_QUERY"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/users", "a=%"),
+                        "INVALID_QUERY"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/users", "a=%zz"),
+                        "INVALID_QUERY"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/users", "a=%00"),
+                        "INVALID_QUERY"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/users", "a=%E4%B8"),
+                        "INVALID_QUERY"),
+                Arguments.of(request(APP_KEY, "GET", "api.example.com", "/v1/users", null,
+                                null, -1L),
+                        "INVALID_TIMESTAMP"),
+                Arguments.of(request(APP_KEY, "POST", "api.example.com", "/v1/users", null,
+                                " ", 1_760_000_000L),
+                        "CONTENT_TYPE_REQUIRED")
+        );
+    }
+
+    private static HmacCanonicalRequest request(
+            String appKey,
+            String method,
+            String host,
+            String path
+    ) {
+        return request(appKey, method, host, path, null, null, 1_760_000_000L);
+    }
+
+    private static HmacCanonicalRequest request(
+            String appKey,
+            String method,
+            String host,
+            String path,
+            String query
+    ) {
+        return request(appKey, method, host, path, query, null, 1_760_000_000L);
+    }
+
+    private static HmacCanonicalRequest request(
+            String appKey,
+            String method,
+            String host,
+            String path,
+            String query,
+            String contentType,
+            long timestamp
+    ) {
+        byte[] body = contentType == null ? bytes("") : bytes("{}");
+        return new HmacCanonicalRequest(
+                appKey,
+                method,
+                host,
+                path,
+                query,
+                contentType,
+                timestamp,
+                NONCE,
+                body
         );
     }
 
