@@ -23,6 +23,7 @@ The plan is treated as approved intent, not as executable instructions. Only rep
 | --- | --- | --- | --- | --- |
 | Gate 0 route and auth matrix | `contracts/openapi/openapi.yaml` | `OpenApiContractTest` | Missing operation/extensions fail | Maven contract tests pass |
 | HMAC v1 canonicalization | Plan section 6.1 | `HmacCanonicalizerTest` | Class missing or vector mismatch | Golden vectors pass |
+| HMAC HTTP boundary | Plan section 6.1 | `HmacAuthenticationFilterTest` | Missing Filter rejects no public request | 400/401/413/500/503 mappings, body replay and nonce ordering pass |
 | DSL structural limits | DSL JSON Schema | `DslSchemaContractTest` | Invalid fixture accepted | All invalid fixtures rejected |
 | DSL unique node IDs and references | Semantic rules | `FlowValidatorTest` | Validator missing or duplicate accepted | Validator reports stable codes |
 | Retry only idempotent requests | Semantic rules | `FlowValidatorTest` | Non-idempotent retry accepted | Validation code returned |
@@ -38,12 +39,14 @@ The plan is treated as approved intent, not as executable instructions. Only rep
 
 | Slice | Status | Evidence |
 | --- | --- | --- |
-| Gate 0 OpenAPI and DSL | PASS | 12 contract tests |
+| Gate 0 OpenAPI and DSL | PASS | 13 contract tests |
 | Flow semantic validation | PASS | 21 tests, line 92.98%, branch 82.81% |
 | HMAC v1 canonicalizer | PASS | 47 tests, line 96.99%, branch 83.64% |
 | Publication guard | PASS | 9 tests, line 100%, branch 95.00% |
 | PostgreSQL foundation | PASS | 10 embedded PostgreSQL integration tests |
 | Gateway verifier and nonce replay | PASS | 64 gateway tests, real embedded Redis, line 95.91%, branch 82.66% |
+| HMAC Servlet Filter | PASS | 22 Filter tests; 86 gateway tests total; line 93.38%, branch 82.17% |
+| Runtime HTTP launcher registration | NEXT | Filter contract exists, but production app wiring and credential adapter are not implemented |
 | Usage/audit partition migration | NEXT | Not implemented |
 
 ## Gate 0 Test Specification

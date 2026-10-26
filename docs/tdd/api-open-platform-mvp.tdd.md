@@ -107,9 +107,10 @@
 ## Security Review
 
 - **Review artifact:** `docs/security/2026-10-26-hmac-publication-database.md`
-- **Unresolved High findings:** none.
+- **High findings:** none in the implemented and tested component boundaries.
+- **Deployment blocker:** the Filter is not yet registered by a production HTTP launcher, so this is not a complete public gateway.
 - **Residual Medium items:**
-  - HTTP HMAC verification, timestamp skew, nonce replay and constant-time comparison are not yet wired.
+  - A production credential resolver, credential/auth-epoch invalidation and bounded Secret cache are not yet implemented.
   - RLS depends on trusted `app.tenant_id` middleware.
   - usage/request/audit partition tables are not in `V1`.
 
@@ -124,6 +125,20 @@
 - **Coverage:** line 95.91% (352/367), branch 82.66% (205/248).
 - **Real Redis evidence:** embedded Redis test executes concurrent claims; exactly one contender wins, and TTL is bounded.
 
+## HMAC Authentication Filter Slice
+
+- **RED:** `mvn -pl gateway-runtime test` initially could not execute the Filter tests because the test classpath lacked Spring Web; adding the test-only `spring-web` dependency exposed the Filter implementation contract.
+- **HTTP boundary:** `/open/v1` and `/open/v1/**` require v1 HMAC headers, a 10-digit timestamp, a Host header and a uniquely supplied `Content-Length`.
+- **Request handling:** raw bodies are capped at 1 MiB, cached for downstream consumption, and bounded even when `Content-Length` is absent.
+- **Authentication order:** timestamp/signature verification occurs before the nonce claim. Resolver Secret arrays are defensive copies and are wiped after verification.
+- **Error mapping:** malformed input returns 400, authentication failure/replay returns 401, oversized bodies return 413, configuration/runtime failure returns 500, and unavailable Redis/credential storage returns retryable 503.
+- **Security RED:** an authenticated request with duplicate `Content-Length` headers returned 200; the expected result was 400 `DUPLICATE_HEADER`.
+- **Security fix:** ambiguous `Content-Length` headers are rejected before body or signature processing.
+- **GREEN:** `mvn verify`
+- **Tests:** 86 gateway tests, including 22 Filter tests.
+- **Coverage:** line 93.38% (494/529), branch 82.17% (258/314).
+- **Known gap:** the Filter class is not yet registered by a production HTTP launcher, and the credential resolver remains an integration interface.
+
 ## Git Checkpoints
 
 | Slice | RED | GREEN | Follow-up |
@@ -132,25 +147,26 @@
 | Publication guard | `e9db14a` | `ccdde7e` | `e2e230a` coverage |
 | PostgreSQL foundation | `13fb211` | `f497eb9` | `c396e55` RED, `03b3976` revoke guard, `f5e9f22` RED, `030ac3f` commit-time guard |
 | HMAC verifier/replay | `9a978c7` | `e4fd7d0` | `34db036` boundary hardening |
+| HMAC authentication filter | `25fec7b` | `fe37c4f` | `c140907` RED, `e17b418` Content-Length hardening |
 
 ## Final Verification
 
 - **Command:** `mvn verify`
 - **Result:** BUILD SUCCESS
-- **Contract tests:** 12 passed
+- **Contract tests:** 13 passed
 - **Flow validator tests:** 21 passed
-- **HMAC tests:** 64 passed
+- **HMAC tests:** 86 passed
 - **Publication guard tests:** 9 passed
 - **PostgreSQL foundation tests:** 10 passed
-- **Total tests:** 116 passed, 0 failed, 0 errors, 0 skipped
-- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 95.91%/branch 82.66%; control line 100%/branch 95.00%
+- **Total tests:** 139 passed, 0 failed, 0 errors, 0 skipped
+- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 93.38%/branch 82.17%; control line 100%/branch 95.00%
 
 ## Self Evaluation
 
 | Axis | Score | Evidence |
 | --- | --- | --- |
-| Accuracy | 5 | OpenAPI parses, all 116 tests pass, PostgreSQL constraints and real Redis replay behavior are exercised, and JaCoCo gates pass. |
-| Completeness | 4 | Gate 0, semantic validation, HMAC canonicalization/verification, replay protection, publication guard and DB foundation are complete. HTTP filter wiring, runtime execution and usage/audit persistence remain future TDD slices. |
+| Accuracy | 5 | OpenAPI parses, all 139 tests pass, PostgreSQL constraints and real Redis replay behavior are exercised, and JaCoCo gates pass. |
+| Completeness | 4 | Gate 0, semantic validation, HMAC canonicalization/verification, Servlet Filter integration, replay protection, publication guard and DB foundation are complete. Runtime launcher wiring, credential lifecycle, runtime execution and usage/audit persistence remain future TDD slices. |
 | Clarity | 4 | Contracts, test map and evidence report are linked and use stable error codes. The OpenAPI artifact is large and will benefit from generated documentation. |
 | Actionability | 5 | `mvn verify` is the single validation command. The contract map identifies the next RED targets. |
 | Conciseness | 4 | Test and contract artifacts are focused; the full OpenAPI file is large but serves as the authoritative consumer boundary. |
@@ -159,8 +175,8 @@
 
 **Highest-impact improvements:**
 
-1. Implement HMAC verification, nonce replay protection and timestamp skew before gateway routing.
-2. Enforce DSL byte, node, depth and cumulative runtime budgets at the service boundary.
-3. Add usage/request/audit partition migrations and provider-side OpenAPI response validation.
+1. Register the HMAC Filter in a real runtime app and implement the database/KMS credential resolver with epoch invalidation.
+2. Add application/grant/API lifecycle authorization plus pre-auth and post-auth rate limiting.
+3. Enforce DSL byte, node, depth and cumulative runtime budgets, then add usage/request/audit partition migrations.
 
-**Self-check:** The 4.4 score reflects that the requested verification/replay slice is verifiably complete, while HTTP filter wiring and runtime persistence features are explicitly identified.
+**Self-check:** The 4.4 score reflects that the requested Servlet Filter slice is verifiably complete, while runtime launcher wiring, credential lifecycle and runtime persistence features are explicitly identified.

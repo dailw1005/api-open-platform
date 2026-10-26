@@ -1,9 +1,12 @@
 # API 开放平台 MVP 整体方案与实施蓝图
 
-> 状态：Approved；Gate 0、FlowValidator、HMAC v1 签名与验证/防重放、Publication Guard、PostgreSQL 基础迁移均已 GREEN。  
-> 范围：整体方案、数据模型、编排 DSL、安全基线、技术选型与实施切片。  
-> 约束：本阶段不编写业务代码。
-> 仓储前提：当前目录尚不是 Git 仓库；方案确认后由 S0 显式初始化，Blueprint 以 direct mode 执行，不自动创建分支或提交。
+> 状态：Approved；Gate 0、FlowValidator、HMAC v1 签名/验证/防重放与 Servlet Filter、Publication Guard、PostgreSQL 基础迁移均已 GREEN。
+>
+> 范围：整体方案、数据模型、编排 DSL、安全基线、技术选型与实施切片。
+>
+> 实施约束：已进入 ECC TDD；每个生产行为保留 RED/GREEN 检查点，不跳过契约与覆盖率门禁。
+>
+> 仓储前提：Git 仓库已初始化，当前在 `master` 以 direct mode 连续交付小切片。
 
 ## 1. 结论摘要
 
@@ -852,9 +855,11 @@ TDD Gate 0：先将上述接口固化为 OpenAPI 3.1，补充每个操作的请�
 
 关键路径：`S0 -> S1 -> S3 -> S4 -> S6 -> S10 -> S11`；编排能力从 `S2 -> S7 -> S8 -> S9 -> S10` 独立推进。
 
-## 13. 待确认决策
+S4 当前已完成 HMAC 黄金向量、签名验证、时间窗、Nonce 防重放、Servlet Filter、请求体上限和统一错误映射。剩余 credential/auth-epoch 生命周期校验、运行时启动器注册和单一 API 代理。
 
-建议按以下默认值进入 TDD，确认后才能开始写业务代码：
+## 13. 已确认默认决策
+
+以下默认决策已确认，作为后续 TDD 的固定基线：
 
 1. **多租户与可见性：** MVP 默认采用平台级共享单一 API 目录，租户级应用、凭据、用量、日志和编排；租户编排包装 API 默认 `TENANT_PRIVATE`，只有平台系统租户可发布 `PLATFORM_PUBLIC`。
 2. **API 登记权限：** MVP 仅平台管理员登记和发布上游 API；开发者只消费已发布 API。
@@ -869,7 +874,7 @@ TDD Gate 0：先将上述接口固化为 OpenAPI 3.1，补充每个操作的请�
 
 ## 14. Handoff
 
-- 当前状态：方案已完成并通过架构/安全对抗性评审，无 P0/P1 阻断，等待用户确认。
-- 下一 ECC 阶段：`tdd-workflow`。
-- TDD 顺序：OpenAPI Gate 0 与 DSL Schema -> 契约测试/单元测试 -> 引擎分支/异常测试 -> 集成测试 -> 实现 -> Code Review -> Security Audit -> Docs -> ECC Memory。
-- 在确认前不编写业务代码、不创建数据库迁移、不实现接口。
+- 当前状态：方案与默认决策已确认；Gate 0、FlowValidator、HMAC verifier/replay、HMAC Servlet Filter、Publication Guard 和 PostgreSQL 基础迁移均已通过 `mvn verify`。
+- 当前部署边界：Filter 尚未由生产 HTTP 启动器注册，ActiveCredentialResolver 仍为集成接口，因此不视为完整网关上线。
+- 下一 TDD 切片：运行时 HTTP 启动器 + 数据库/KMS credential resolver + auth-epoch 失效契约，随后补应用/授权/API 生命周期校验。
+- 每次切片继续执行 RED -> GREEN -> Coverage -> Security/Docs checkpoint；`mvn verify` 是统一验证命令。
