@@ -1,5 +1,6 @@
 package com.apiproject.app.security;
 
+import com.apiproject.gateway.security.CredentialResolutionException;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
@@ -87,6 +88,50 @@ class GatewayDatabaseRoleVerifierTest {
         );
         assertEquals("INTERNAL_CONFIGURATION", exception.code());
         assertTrue(exception.getMessage().contains("superuser"));
+    }
+
+    @Test
+    void rejectsBypassRlsGatewayRole() throws Exception {
+        createRole(
+                "gateway_bypass_rls",
+                "LOGIN BYPASSRLS PASSWORD 'test-password'"
+        );
+        grantFunctionOnly("gateway_bypass_rls");
+
+        GatewayDatabaseRoleVerifier verifier = verifierFor("gateway_bypass_rls");
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                verifier::verify
+        );
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+        assertTrue(exception.getMessage().contains("BYPASSRLS"));
+    }
+
+    @Test
+    void rejectsGatewayRoleWithoutFunctionExecute() throws Exception {
+        createRole(
+                "gateway_no_function",
+                "LOGIN PASSWORD 'test-password'"
+        );
+        try (Connection connection = adminDataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute(
+                    "GRANT CONNECT ON DATABASE postgres TO gateway_no_function"
+            );
+            statement.execute(
+                    "GRANT USAGE ON SCHEMA public TO gateway_no_function"
+            );
+        }
+
+        GatewayDatabaseRoleVerifier verifier = verifierFor("gateway_no_function");
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                verifier::verify
+        );
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+        assertTrue(exception.getMessage().contains("EXECUTE"));
     }
 
     private static void createRole(String roleName, String attributes)

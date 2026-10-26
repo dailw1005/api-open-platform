@@ -1,6 +1,7 @@
 package com.apiproject.app;
 
 import com.apiproject.app.security.CredentialSecretDecryptor;
+import com.apiproject.app.security.GatewayDatabaseRoleVerifier;
 import com.apiproject.app.security.JdbcActiveCredentialResolver;
 import com.apiproject.gateway.security.ActiveCredentialResolver;
 import com.apiproject.gateway.security.HmacAuthenticationFilter;
@@ -10,7 +11,9 @@ import com.apiproject.gateway.security.JedisNonceReplayStore;
 import com.apiproject.gateway.security.NonceReplayGuard;
 import com.apiproject.gateway.security.NonceReplayStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -49,6 +52,24 @@ public class RuntimeSecurityConfiguration {
             CredentialSecretDecryptor decryptor
     ) {
         return new JdbcActiveCredentialResolver(dataSource, decryptor);
+    }
+
+    @Bean
+    GatewayDatabaseRoleVerifier gatewayDatabaseRoleVerifier(DataSource dataSource) {
+        return new GatewayDatabaseRoleVerifier(dataSource);
+    }
+
+    @Bean
+    @ConditionalOnProperty(
+            prefix = "gateway.security.database-role-verification",
+            name = "enabled",
+            havingValue = "true",
+            matchIfMissing = true
+    )
+    ApplicationRunner gatewayDatabaseRoleVerificationRunner(
+            GatewayDatabaseRoleVerifier verifier
+    ) {
+        return arguments -> verifier.verify();
     }
 
     @Bean

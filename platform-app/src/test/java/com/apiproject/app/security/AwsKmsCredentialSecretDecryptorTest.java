@@ -154,6 +154,33 @@ class AwsKmsCredentialSecretDecryptorTest {
         assertFalse(exception.retryable());
     }
 
+    @Test
+    void nullResponseFailsClosed() {
+        when(kmsClient.decrypt(any(DecryptRequest.class))).thenReturn(null);
+
+        CredentialDecryptionException exception = assertThrows(
+                CredentialDecryptionException.class,
+                () -> decryptor.decrypt(context(), CIPHERTEXT)
+        );
+
+        assertFalse(exception.retryable());
+    }
+
+    @Test
+    void unexpectedRuntimeFailureIsNonRetryable() {
+        when(kmsClient.decrypt(any(DecryptRequest.class))).thenThrow(
+                new IllegalStateException("unexpected")
+        );
+
+        CredentialDecryptionException exception = assertThrows(
+                CredentialDecryptionException.class,
+                () -> decryptor.decrypt(context(), CIPHERTEXT)
+        );
+
+        assertFalse(exception.retryable());
+        assertFalse(exception.getMessage().contains("unexpected"));
+    }
+
     private CredentialEncryptionContext context() {
         return new CredentialEncryptionContext(
                 TENANT_ID,

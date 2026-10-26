@@ -66,7 +66,7 @@ class RuntimeHmacIntegrationTest {
     static void runtimeProperties(DynamicPropertyRegistry registry) {
         registry.add(
                 "spring.datasource.url",
-                () -> POSTGRES.getJdbcUrl("postgres", "postgres")
+                () -> POSTGRES.getJdbcUrl("gateway_staging", "postgres")
         );
         registry.add("spring.datasource.username", () -> "gateway_staging");
         registry.add("spring.datasource.password", () -> "test-password");
