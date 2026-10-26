@@ -208,6 +208,12 @@ public final class HmacAuthenticationFilter implements Filter {
         Optional<byte[]> resolvedSecret;
         try {
             resolvedSecret = credentialResolver.resolveActiveSecret(appKey);
+        } catch (CredentialResolutionException exception) {
+            throw new FilterException(
+                    exception.retryable() ? 503 : 500,
+                    exception.code(),
+                    exception.retryable()
+            );
         } catch (RuntimeException exception) {
             throw new FilterException(
                     503,
