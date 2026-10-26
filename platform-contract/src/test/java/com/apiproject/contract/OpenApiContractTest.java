@@ -208,10 +208,16 @@ class OpenApiContractTest {
     }
 
     @Test
-    void publicOperationsDocumentBodyLimitAndInternalErrors() {
+    void publicOperationsDocumentAuthorizationRateLimitAndFailureResponses() {
         operations.values().stream()
                 .filter(operation -> "HMAC_V1".equals(operation.getExtensions().get("x-auth-kind")))
                 .forEach(operation -> {
+                    assertTrue(operation.getResponses().containsKey("403"),
+                            operation.getOperationId() + " missing 403");
+                    assertTrue(operation.getResponses().containsKey("404"),
+                            operation.getOperationId() + " missing 404");
+                    assertTrue(operation.getResponses().containsKey("429"),
+                            operation.getOperationId() + " missing 429");
                     assertTrue(operation.getResponses().containsKey("413"),
                             operation.getOperationId() + " missing 413");
                     assertTrue(operation.getResponses().containsKey("500"),
