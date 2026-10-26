@@ -311,6 +311,40 @@ class DatabaseFoundationTest {
     }
 
     @Test
+    void cannotCommitSupersededPublicationWhileStillActive() throws Exception {
+        UUID tenant = UUID.randomUUID();
+        UUID user = UUID.randomUUID();
+        UUID api = UUID.randomUUID();
+        UUID version = UUID.randomUUID();
+        UUID publication = UUID.randomUUID();
+
+        try (Connection connection = dataSource.getConnection()) {
+            insertTenant(connection, tenant, "supersede-active");
+            insertUserAndRole(connection, tenant, user, "supersede@example.com", "APP_DEVELOPER");
+            insertApiDefinition(connection, tenant, api, "supersede-api", "/v1/supersede");
+            insertApiVersion(connection, api, user, version);
+            insertPublicationWithId(
+                    connection,
+                    publication,
+                    api,
+                    tenant,
+                    version,
+                    user,
+                    "PROD",
+                    "ACTIVE",
+                    1
+            );
+            activatePublication(connection, api, publication);
+
+            SQLException exception = assertThrows(
+                    SQLException.class,
+                    () -> supersedePublication(connection, publication)
+            );
+            assertEquals("23514", exception.getSQLState());
+        }
+    }
+
+    @Test
     void rejectsNonProductionPublication() throws Exception {
         UUID tenant = UUID.randomUUID();
         UUID user = UUID.randomUUID();
@@ -593,6 +627,18 @@ class DatabaseFoundationTest {
         try (PreparedStatement statement = connection.prepareStatement("""
                 UPDATE api_publication
                 SET status = 'REVOKED'
+                WHERE id = ?
+                """)) {
+            statement.setObject(1, publication);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void supersedePublication(Connection connection, UUID publication)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                UPDATE api_publication
+                SET status = 'SUPERSEDED'
                 WHERE id = ?
                 """)) {
             statement.setObject(1, publication);
