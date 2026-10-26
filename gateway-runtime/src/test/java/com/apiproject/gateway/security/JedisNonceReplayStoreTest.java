@@ -17,6 +17,7 @@ import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JedisNonceReplayStoreTest {
@@ -90,5 +91,17 @@ class JedisNonceReplayStoreTest {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    void rejectsNonPositiveTtlBeforeRedisCommand() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> store.claim(
+                        "apip:auth:nonce:v1:invalid-ttl",
+                        Duration.ZERO
+                )
+        );
+        assertEquals(-2, jedis.pttl("apip:auth:nonce:v1:invalid-ttl"));
     }
 }

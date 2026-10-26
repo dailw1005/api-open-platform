@@ -73,6 +73,28 @@ class NonceReplayGuardTest {
         assertEquals("NONCE_STORE_UNAVAILABLE", exception.code());
     }
 
+    @Test
+    void invalidInputsDoNotReachStore() {
+        RecordingStore store = new RecordingStore();
+        NonceReplayGuard guard = NonceReplayGuard.createDefault(store);
+
+        assertEquals(
+                "INVALID_REQUEST",
+                assertThrows(
+                        HmacVerificationException.class,
+                        () -> guard.assertUnused("bad key", NONCE)
+                ).code()
+        );
+        assertEquals(
+                "INVALID_REQUEST",
+                assertThrows(
+                        HmacVerificationException.class,
+                        () -> guard.assertUnused(APP_KEY, "short")
+                ).code()
+        );
+        assertEquals(0, store.attempts);
+    }
+
     private static final class RecordingStore implements NonceReplayStore {
         private final Set<String> claimed = new HashSet<>();
         private int attempts;
