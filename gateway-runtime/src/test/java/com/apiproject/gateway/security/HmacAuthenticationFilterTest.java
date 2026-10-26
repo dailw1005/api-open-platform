@@ -188,6 +188,27 @@ class HmacAuthenticationFilterTest {
     }
 
     @Test
+    void duplicateContentLengthReturns400() throws Exception {
+        MockHttpServletRequest request = signedRequest(
+                "GET",
+                "/open/v1/orders",
+                null,
+                bytes(""),
+                null,
+                NONCE,
+                TIMESTAMP
+        );
+        request.addHeader("Content-Length", "0");
+        request.addHeader("Content-Length", "0");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertError(response, chain, 400, "DUPLICATE_HEADER");
+    }
+
+    @Test
     void unknownCredentialReturns401WithoutSecretLeak() throws Exception {
         filter = filterWithResolver(nonceStore, appKey -> Optional.empty());
         MockHttpServletRequest request = signedRequest(
