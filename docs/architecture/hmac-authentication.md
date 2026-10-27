@@ -33,8 +33,8 @@ outside that prefix pass through unchanged.
 9. Resolve the exact published method/path and require an ACTIVE app grant.
 10. Atomically check application/API token buckets and application/API daily
     and monthly quotas.
-11. Attach authenticated identity and the authorized API snapshot, then pass
-    the request to routing.
+11. Attach authenticated identity and the authorized API snapshot.
+12. Resolve the published upstream target and proxy the authorized request.
 
 The nonce is deliberately claimed after signature verification so an
 unauthenticated caller cannot burn a valid client's nonce. The resolved Secret
@@ -105,15 +105,16 @@ credentials provider chain and a key policy scoped to the gateway workload.
 ## Application And API Authorization
 
 Authorization runs only after signature verification and Nonce claim.
-`auth_authorize_public_api(appKey, method, path)` uses an exact method/path
-match and returns:
+`auth_authorize_public_api(appKey, method, path)` matches exact and templated
+published routes, applies literal-before-parameter precedence, and returns:
 
 - `API_NOT_GRANTED` when the published API exists but no ACTIVE app grant does;
 - `API_NOT_FOUND` when the route is not actively published or a
   `TENANT_PRIVATE` API belongs to another tenant;
 - `INVALID_CREDENTIAL` if the credential state changed between authentication
   and authorization;
-- `ALLOWED` with application, API, version, tenant and visibility metadata.
+- `ALLOWED` with application, API, version, tenant, visibility and immutable
+  route-parameter metadata.
 
 The credential, authorization and policy lookup functions are `SECURITY
 DEFINER`, revoke `PUBLIC`, and must be granted to the non-superuser gateway
@@ -121,7 +122,7 @@ role.
 
 ## Post-Authentication Limits And Quotas
 
-Post-authentication limits run after the nonce claim and exact-route
+Post-authentication limits run after the nonce claim and resolved-route
 authorization. Application limits use `app_id`, while API limits use `api_id`
 and are global across applications and tenants.
 
@@ -197,7 +198,10 @@ All Filter errors use the stable JSON envelope:
 | 413 | `REQUEST_TOO_LARGE` | false |
 | 429 | `RATE_LIMITED`, `QUOTA_EXCEEDED` | true |
 | 500 | `INTERNAL_CONFIGURATION`, `INTERNAL_ERROR` | false |
+| 502 | `UPSTREAM_ERROR` | false for invalid target, true for transport or upstream 5xx |
 | 503 | `NONCE_STORE_UNAVAILABLE`, `CREDENTIAL_STORE_UNAVAILABLE`, `AUTHORIZATION_STORE_UNAVAILABLE`, `RATE_LIMIT_UNAVAILABLE` | true |
+| 503 | `TARGET_STORE_UNAVAILABLE` | true |
+| 504 | `UPSTREAM_TIMEOUT` | true |
 
 Error responses never include the Secret, provided Signature, stack traces,
 credential-store details, or internal configuration.
@@ -231,7 +235,13 @@ credential/app epoch validation and a strict maximum staleness window.
 
 Startup also verifies that the connected database role is not superuser, does
 not have `BYPASSRLS`, can execute the credential, authorization and post-auth
-policy functions, and cannot select or mutate `app_credential` directly.
+policy functions, can execute API target resolution, and cannot select or
+mutate `app_credential` directly.
+
+`ApiProxyFilter` runs after the authentication Filter. It expands the published
+upstream route, applies Header allowlists and a 1 MiB response bound, disables
+redirect following, and maps transport/status failures to the stable proxy
+errors. See `docs/architecture/single-api-proxy.md`.
 
 ## Remaining Production Work
 
@@ -242,6 +252,5 @@ policy functions, and cannot select or mutate `app_credential` directly.
   network edge.
 - Add bounded request concurrency, distributed Redis Cluster coordination,
   multi-instance load tests and quota reconciliation from immutable usage.
-- Replace exact path matching with reviewed route-template resolution.
-- Add route resolution, upstream proxy/orchestration dispatch, metering and
-  sanitized request logging.
+- Inject reviewed upstream `auth_ref` credentials and enforce TLS/egress zones.
+- Add orchestration dispatch, metering and sanitized request logging.

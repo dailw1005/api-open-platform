@@ -1,17 +1,19 @@
-# Security Review: HMAC, Publication Guard, Database Foundation
+# Security Review: HMAC, Gateway Proxy, Publication Guard, Database Foundation
 
 ## Scope
 
 - HMAC v1 canonicalization and golden vectors.
 - HMAC Servlet Filter authentication, request-body limits, error mapping and replay ordering.
 - Spring Boot runtime registration, JDBC credential resolution and concrete AWS KMS decryptor.
-- Exact-route application/API authorization and pre-authentication rate limiting.
+- Templated application/API authorization and pre-authentication rate limiting.
 - Post-authentication application/API token buckets and UTC daily/monthly quotas.
+- Published PROXY target resolution and single API HTTP forwarding.
 - Publication activation guard.
 - PostgreSQL foundation, credential/authorization/policy lookup migrations, composite tenant keys, RLS and active-publication triggers.
 
 This review does not claim that real staging AWS KMS/key-policy validation,
-trusted proxy IP extraction, Redis Cluster coordination, quota reconciliation or upstream routing is complete.
+trusted proxy IP extraction, DNS/egress enforcement, upstream credential injection,
+Redis Cluster coordination, quota reconciliation or orchestration routing is complete.
 
 ## Checklist
 
@@ -26,11 +28,13 @@ trusted proxy IP extraction, Redis Cluster coordination, quota reconciliation or
 | Credential lookup privilege | PASS | `auth_resolve_active_credential` is `SECURITY DEFINER`, has a fixed `search_path`, revokes `PUBLIC`, and is tested through the non-superuser `app_runtime` role with explicit `EXECUTE`. |
 | Credential lifecycle | PASS | Active and unexpired rotating credentials resolve; suspended tenant/app, revoked and expired credentials return no row. |
 | KMS encryption context | PASS | AWS KMS decrypt requests bind `tenantId`, `appId`, `credentialId` and `appKey`; 429/5xx and transport errors are retryable, deterministic KMS failures are not. |
-| Database role verification | PASS | Startup rejects superuser/BYPASSRLS roles, requires credential, authorization and post-auth policy function grants, and rejects direct `app_credential` DML access. The runtime E2E test uses a restricted login role. |
-| API authorization | PASS | Exact active method/path, PROD publication, tenant visibility and ACTIVE app grant are required after signature/Nonce verification; no-grant returns 403 and unpublished/foreign-private routes return 404. |
+| Database role verification | PASS | Startup rejects superuser/BYPASSRLS roles, requires credential, authorization, post-auth policy and target-resolution function grants, and rejects direct `app_credential` DML access. |
+| API authorization | PASS | Literal/template matching, PROD publication, tenant visibility and ACTIVE app grant are required after signature/Nonce verification; ambiguous route shapes are rejected. |
 | Pre-auth rate limit | PASS | Redis Lua applies atomic fixed-window per-IP limiting before Header/body processing; denial is 429 with standard Headers and Redis errors fail closed as 503. |
 | Post-auth limits | PASS | One Lua command checks application/API token buckets plus daily/monthly quotas with captured Redis time; any denial consumes no other dimension. |
 | Policy tenant integrity | PASS | Policy tables use RLS and unique scope keys; application policy rows must match the application tenant, while API policies must be platform-global. |
+| Single API proxy | PASS | Published proxy target resolution, route expansion, Header allowlists, body/query forwarding, 502/504 mapping, response bound and redirect blocking are covered. |
+| SSRF baseline | PASS for literal addresses | HTTPS-only targets and literal loopback/private/link-local/reserved ranges are rejected; DNS answers and egress zones require deployment controls. |
 | Injection | PASS | Database integration tests use prepared statements; migrations use static SQL and typed parameters. |
 | Tenant isolation | PASS | Composite foreign keys, RLS policies and cross-tenant insert/select tests pass on PostgreSQL 18.6. |
 | Publication integrity | PASS | Guard plus database trigger reject non-PROD, mismatched, revoked and reparented active publications. |
@@ -175,16 +179,34 @@ trusted proxy IP extraction, Redis Cluster coordination, quota reconciliation or
 - **Residual risk:** The policy schema accepts `TENANT` scope, but the runtime decision currently resolves only application and API budgets.
 - **Required follow-up:** Add tenant-scope policy resolution and cross-layer tests before claiming the full tenant/app/API hierarchy.
 
-### Accepted: authorization uses exact route matching
+### Fixed: exact-only authorization blocked parameterized APIs
 
+- **Severity:** Medium before the fix
+- **Risk:** APIs with path parameters were unreachable, while ad hoc matching could create ambiguous authorization.
+- **Fix:** Added a constrained route grammar, left-to-right literal precedence, unique route signatures, duplicate parameter rejection and safe parameter extraction.
+- **Evidence:** `ApiAuthorizationLookupTest`, `ApiTargetTest`, `RouteTemplateExpanderTest`, `RuntimeHmacIntegrationTest`.
+
+### Fixed: authorized requests had no executable upstream path
+
+- **Severity:** High before the fix
+- **Risk:** A request could pass every security gate but had no approved mechanism to reach a registered upstream.
+- **Fix:** Added published PROXY target lookup, a dedicated proxy Filter, bounded JDK HTTP forwarding, Header allowlists and stable proxy errors.
+- **Evidence:** `JdbcApiTargetResolverTest`, `ApiProxyFilterTest`, `JdkUpstreamClientTest`, `RuntimeHmacIntegrationTest`.
+
+### Accepted: DNS and egress policy are deployment controls
+
+- **Severity:** High if egress is unrestricted
+- **Residual risk:** Literal private addresses are rejected, but a public DNS name can resolve or rebind to a private address. `egress_zone` and `tls_policy` are not enforced by the Java client.
+- **Required follow-up:** Resolve-and-pin or enforce a network egress allowlist/private-address firewall in staging and production before accepting untrusted upstream configuration.
+
+### Deferred: upstream credentials and response streaming
 - **Severity:** Medium
-- **Residual risk:** APIs with path parameters are not matched by `auth_authorize_public_api`; treating templates as literals would make them unreachable or, if changed carelessly, risks ambiguous authorization.
-- **Required follow-up:** Add a reviewed route-template compiler with precedence and ambiguity tests before enabling parameterized public paths.
-
+- **Residual risk:** `upstream_environment.auth_ref` is not injected, response bodies are buffered up to 1 MiB, and retry policy is absent.
+- **Required follow-up:** Add a KMS/Vault-backed upstream auth adapter, streaming bounds for large media, and explicit idempotency-aware retry rules.
 ## Verdict
 
 No unresolved High finding remains in the implemented and locally tested
 component boundaries. Real staging dependencies, trusted client-IP
-configuration and Redis Cluster coordination remain explicit High deployment
-prerequisites; remaining reconciliation and routing gaps are tracked in the TDD
-evidence report.
+configuration, DNS/egress enforcement, upstream credential injection and Redis
+Cluster coordination remain explicit deployment prerequisites; reconciliation
+and orchestration gaps are tracked in the TDD evidence report.

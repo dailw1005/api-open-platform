@@ -15,10 +15,11 @@ for:
 `V1__foundation.sql` creates the schema and invariants.
 `V2__active_credential_lookup.sql` adds the constrained gateway authentication
 lookup function.
-`V3__api_authorization_lookup.sql` adds exact-route application/grant
-authorization. `V4__post_auth_limits_and_policies.sql` adds application/API
-rate and quota policies, returns `app_id` from authorization and adds the
-restricted policy lookup function.
+`V3__api_authorization_lookup.sql` adds application/grant authorization.
+`V4__post_auth_limits_and_policies.sql` adds application/API rate and quota
+policies, returns `app_id` from authorization and adds the restricted policy
+lookup function. `V5__route_templates_and_proxy_targets.sql` adds validated
+route templates, ambiguity prevention and published upstream target lookup.
 
 Runtime target: PostgreSQL 16+; integration tests run against embedded PostgreSQL 18.6.
 
@@ -68,8 +69,10 @@ tenant-table access or `BYPASSRLS`.
 function with a fixed `search_path`. It:
 
 - revalidates the ACTIVE credential, app and tenant;
-- finds an exact `PUBLIC_METHOD`/`PUBLIC_PATH` match whose
-  `active_prod_publication_id` references an ACTIVE PROD publication;
+- resolves an exact or templated route whose `active_prod_publication_id`
+  references an ACTIVE PROD publication;
+- gives literal segments precedence over parameter segments;
+- returns a validated route-parameter JSON object;
 - allows `PLATFORM_PUBLIC` across tenants but requires `TENANT_PRIVATE` API
   ownership to match the credential tenant;
 - requires an ACTIVE `app_api_grant`;
@@ -79,10 +82,15 @@ function with a fixed `search_path`. It:
   across credential rotation;
 - revokes execution from `PUBLIC`.
 
+Route templates use literal safe segments or `{name}` placeholders. Duplicate
+parameter names are rejected. `route_signature` replaces parameter names with
+`{}` and a unique index on `(public_method, route_signature)` prevents
+ambiguous route shapes.
+
 Gateway startup verifies `EXECUTE` on `auth_resolve_active_credential`,
-`auth_authorize_public_api` and `auth_resolve_post_auth_policies`, rejects
-superuser/BYPASSRLS roles, and verifies the role has no direct
-`app_credential` DML privileges.
+`auth_authorize_public_api`, `auth_resolve_post_auth_policies` and
+`auth_resolve_api_target`, rejects superuser/BYPASSRLS roles, and verifies the
+role has no direct `app_credential` DML privileges.
 
 ## Post-Auth Policy Lookup
 
@@ -106,6 +114,21 @@ the runtime to apply mandatory process defaults where no row exists.
 
 The gateway role receives `EXECUTE` only. It does not receive direct policy
 table access.
+
+## Published Upstream Target Lookup
+
+`auth_resolve_api_target(apiId, apiVersionId)` is `SECURITY DEFINER` with a
+fixed `search_path`. It returns upstream method, path template, HTTPS base URL
+and timeout only when:
+
+- the API is PUBLISHED and kind `PROXY`;
+- the active PROD publication matches the requested version;
+- the API version is PUBLISHED;
+- the configured endpoint belongs to the API owner and is ACTIVE;
+- the newest ACTIVE PROD environment is selected.
+
+Malformed JSON endpoint IDs do not resolve. The runtime role receives
+`EXECUTE` and no direct upstream table access.
 
 ## Test Command
 
@@ -132,6 +155,11 @@ The tests use native embedded PostgreSQL, run Flyway, assume a non-superuser run
 - application/API policy overrides resolve through the restricted function;
 - policy tables enforce RLS and unique scope resolution;
 - application policy rows owned by another tenant are ignored.
+- literal route segments win over parameter segments;
+- duplicate parameter names and ambiguous route shapes are rejected;
+- safe route parameters are extracted and unsafe encoded separators do not
+  match;
+- only the active published proxy version resolves an ACTIVE PROD target.
 
 ## Out Of Scope
 

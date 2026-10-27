@@ -6,6 +6,7 @@
 - Contract map: `docs/tdd/api-open-platform-mvp.contract-map.md`
 - Gate 0 contract: `docs/contracts/gate-0.md`
 - Staging security runbook: `docs/operations/staging-security-validation.md`
+- Single API proxy design: `docs/architecture/single-api-proxy.md`
 
 ## Gate 0 Contract Cycle
 
@@ -202,6 +203,24 @@
 - **Result:** 229 tests, 0 failures, 0 errors, 0 skipped. Gateway line 93.83%, branch 82.32%; runtime line 95.35%, branch 82.31%.
 - **Git evidence:** RED `a1e6dce`; GREEN `601a8b4`; staging harness `c157dff`.
 
+## Route Template And Single API Proxy Slice
+
+- **RED route/target:** `mvn -pl platform-app -am test` failed compilation because `AuthorizedApi` had no route-parameter snapshot, target types and lookup did not exist.
+- **Route templates:** V5 validates literal/named segments, rejects duplicate parameter names, stores a generated route signature and prevents ambiguous method/signature pairs.
+- **Precedence:** literal segments are compared left to right and win over parameter segments; the most specific published route is chosen before visibility/grant checks.
+- **Target lookup:** `auth_resolve_api_target(apiId, apiVersionId)` returns only an ACTIVE published PROXY version, owner-matched ACTIVE endpoint and newest ACTIVE PROD environment.
+- **Target failure classification:** invalid/missing target is non-retryable 502 `UPSTREAM_ERROR`; target database outage is retryable 503 `TARGET_STORE_UNAVAILABLE`.
+- **RED proxy:** `mvn -pl platform-app -am test` failed compilation because proxy Filter, upstream client, request/response values and template expander did not exist.
+- **Proxy behavior:** authorized requests are forwarded with route expansion, raw query and bounded body. Request/response Headers use allowlists; HMAC/Cookie/Host are not forwarded.
+- **Failure mapping:** upstream transport and 5xx map to retryable 502 `UPSTREAM_ERROR`; timeout maps to 504 `UPSTREAM_TIMEOUT`; oversized response is bounded and non-retryable 502.
+- **SSRF:** HTTPS-only, no userinfo/query/fragment/dot segments/encoded separators, no redirects, and literal loopback/private/link-local/reserved/CGNAT/IPv6 ULA targets are rejected.
+- **E2E:** Embedded Tomcat receives a signed request for `/open/v1/probe/{probeId}`, resolves `probeId`, expands the target and reaches the injected upstream client with the expected `/upstream/probe-123` URI.
+- **Known route gap:** percent-encoded route-parameter values are HMAC-canonicalized but not yet route-matched; public parameter values currently use unencoded safe characters.
+- **Staging result:** NOT EXECUTED. DNS-backed private addresses, deployed egress policy, upstream `auth_ref`, real TLS and a real staging upstream remain unverified.
+- **GREEN:** `mvn verify`
+- **Result:** 265 tests, 0 failures, 0 errors, 0 skipped. Gateway line 93.72%, branch 82.40%; runtime line 94.71%, branch 81.69%.
+- **Git evidence:** route/target RED `8023928`; GREEN `8e446be`; proxy RED `24c0409`; GREEN `1ba8503`.
+
 ## Git Checkpoints
 
 | Slice | RED | GREEN | Follow-up |
@@ -218,6 +237,8 @@
 | Pre-auth rate limit | `882e814` | `9797dd0` | `ebd1614` RED, `3376f7e` sub-ms boundary fix |
 | Post-auth app/API limits and quotas | `a1e6dce` | `601a8b4` | Tenant/RLS and Redis-time hardening inside GREEN |
 | Staging post-auth smoke harness | n/a | `c157dff` | Real staging execution remains blocked |
+| Route templates and target lookup | `8023928` | `8e446be` | V5 route signature and target function |
+| Single API proxy | `24c0409` | `1ba8503` | Header allowlist, SSRF baseline, 502/504; `75d31b9` root-locale normalization |
 
 ## Final Verification
 
@@ -225,19 +246,19 @@
 - **Result:** BUILD SUCCESS
 - **Contract tests:** 13 passed
 - **Flow validator tests:** 21 passed
-- **Gateway tests:** 117 passed
+- **Gateway tests:** 143 passed
 - **Publication guard tests:** 9 passed
-- **PostgreSQL tests:** 20 passed
-- **Runtime tests:** 49 passed
-- **Total tests:** 229 passed, 0 failed, 0 errors, 0 skipped
-- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 93.83%/branch 82.32%; control line 100%/branch 95.00%; runtime line 95.35%/branch 82.31%
+- **PostgreSQL tests:** 24 passed
+- **Runtime tests:** 55 passed
+- **Total tests:** 265 passed, 0 failed, 0 errors, 0 skipped
+- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 93.72%/branch 82.40%; control line 100%/branch 95.00%; runtime line 94.71%/branch 81.69%
 
 ## Self Evaluation
 
 | Axis | Score | Evidence |
 | --- | --- | --- |
-| Accuracy | 5 | OpenAPI parses, all 229 tests pass, PostgreSQL policy/RLS constraints, AWS KMS request semantics, Redis replay and six-key quota semantics, and a restricted-role Tomcat HTTP path are exercised, and JaCoCo gates pass. |
-| Completeness | 4 | Gate 0, semantic validation, HMAC verification, AWS KMS, role verification, app/API authorization, pre/post-auth limiting, daily/monthly quotas, publication guard and DB foundation are complete. Real staging, Redis Cluster, trusted proxy IP handling, reconciliation, routing/orchestration and usage/audit persistence remain future TDD slices. |
+| Accuracy | 5 | OpenAPI parses, all 265 tests pass, PostgreSQL route/target/RLS constraints, AWS KMS request semantics, Redis quotas, real HTTP transport and a restricted-role Tomcat proxy path are exercised, and JaCoCo gates pass. |
+| Completeness | 4 | Gate 0, HMAC, KMS, role verification, route templates, application/API authorization, pre/post-auth limits, published target lookup and single API proxy are complete. Real staging, DNS/egress enforcement, upstream auth injection, Redis Cluster, reconciliation, orchestration and usage/audit persistence remain future TDD slices. |
 | Clarity | 4 | Contracts, test map and evidence report are linked and use stable error codes. The OpenAPI artifact is large and will benefit from generated documentation. |
 | Actionability | 5 | `mvn verify` is the single validation command. The contract map identifies the next RED targets. |
 | Conciseness | 4 | Test and contract artifacts are focused; the full OpenAPI file is large but serves as the authoritative consumer boundary. |
@@ -246,8 +267,8 @@
 
 **Highest-impact improvements:**
 
-1. Execute the staging smoke harness against real KMS, PostgreSQL grants, Redis TLS and trusted proxy routing.
-2. Add two-instance load/boundary tests, usage reconciliation and a reviewed Redis Cluster strategy.
-3. Add route-template resolution, upstream proxy/orchestration execution and usage/request/audit persistence.
+1. Execute the staging smoke and proxy runbook against real KMS, PostgreSQL, Redis, TLS, DNS/egress policy and an upstream.
+2. Implement KMS/Vault-backed upstream `auth_ref`, two-instance proxy/load tests and usage reconciliation.
+3. Add orchestration execution, control-plane management APIs/UI and usage/request/audit persistence.
 
-**Self-check:** The 4.5 score reflects that authentication, authorization, pre/post-auth limits and quotas are verifiably complete locally, while real staging dependencies, proxy trust, Redis Cluster, reconciliation, routing and persistence are explicitly identified.
+**Self-check:** The 4.5 score reflects that authentication, authorization, quotas, route templates and a single-API proxy are verifiably complete locally, while real staging dependencies, DNS/egress controls, upstream credentials, control-plane workflows and orchestration are explicitly identified.
