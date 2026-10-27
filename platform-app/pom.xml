@@ -41,6 +41,11 @@
         </dependency>
         <dependency>
             <groupId>com.apiproject</groupId>
+            <artifactId>platform-control</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.apiproject</groupId>
             <artifactId>platform-persistence</artifactId>
             <version>${project.version}</version>
         </dependency>

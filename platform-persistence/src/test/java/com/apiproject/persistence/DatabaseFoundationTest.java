@@ -26,6 +26,7 @@ class DatabaseFoundationTest {
             "iam_tenant",
             "iam_user",
             "iam_role_binding",
+            "iam_session",
             "app",
             "app_credential",
             "app_api_grant",
@@ -411,6 +412,102 @@ class DatabaseFoundationTest {
         }
     }
 
+    @Test
+    void adminSessionStoresOnlyHashesAndCanBeRevoked() throws Exception {
+        UUID tenant = UUID.randomUUID();
+        UUID user = UUID.randomUUID();
+        String sessionHash = "a".repeat(64);
+        String csrfHash = "b".repeat(64);
+
+        try (Connection connection = dataSource.getConnection()) {
+            insertTenant(connection, tenant, "admin-session");
+            insertUserAndRole(
+                    connection,
+                    tenant,
+                    user,
+                    "admin-session@example.com",
+                    "PLATFORM_ADMIN"
+            );
+
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    INSERT INTO iam_session (
+                        token_hash, user_id, csrf_token_hash, expires_at
+                    ) VALUES (?, ?, ?, now() + interval '8 hours')
+                    """)) {
+                statement.setString(1, sessionHash);
+                statement.setObject(2, user);
+                statement.setString(3, csrfHash);
+                assertEquals(1, statement.executeUpdate());
+            }
+
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    SELECT user_id, csrf_token_hash, revoked_at
+                    FROM iam_session
+                    WHERE token_hash = ?
+                    """)) {
+                statement.setString(1, sessionHash);
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    assertTrue(resultSet.next());
+                    assertEquals(user, resultSet.getObject(1, UUID.class));
+                    assertEquals(csrfHash, resultSet.getString(2));
+                    assertEquals(null, resultSet.getObject(3));
+                    assertTrue(!resultSet.next());
+                }
+            }
+
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    UPDATE iam_session
+                    SET revoked_at = now()
+                    WHERE token_hash = ? AND revoked_at IS NULL
+                    """)) {
+                statement.setString(1, sessionHash);
+                assertEquals(1, statement.executeUpdate());
+                assertEquals(0, statement.executeUpdate());
+            }
+        }
+    }
+
+    @Test
+    void adminSessionRejectsMalformedHashesAndExpiredLifetime() throws Exception {
+        UUID tenant = UUID.randomUUID();
+        UUID user = UUID.randomUUID();
+
+        try (Connection connection = dataSource.getConnection()) {
+            insertTenant(connection, tenant, "admin-session-invalid");
+            insertUserAndRole(
+                    connection,
+                    tenant,
+                    user,
+                    "admin-session-invalid@example.com",
+                    "PLATFORM_ADMIN"
+            );
+
+            SQLException malformedHash = assertThrows(
+                    SQLException.class,
+                    () -> insertAdminSession(
+                            connection,
+                            "raw-session-token",
+                            user,
+                            "b".repeat(64),
+                            "8 hours"
+                    )
+            );
+            assertEquals("23514", malformedHash.getSQLState());
+
+            SQLException expired = assertThrows(
+                    SQLException.class,
+                    () -> insertAdminSession(
+                            connection,
+                            "c".repeat(64),
+                            user,
+                            "d".repeat(64),
+                            "-1 second"
+                    )
+            );
+            assertEquals("23514", expired.getSQLState());
+        }
+    }
+
     private static void createRuntimeRole() throws SQLException {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement()) {
@@ -505,6 +602,26 @@ class DatabaseFoundationTest {
             statement.setObject(2, app);
             statement.setString(3, appKey);
             statement.setBytes(4, new byte[]{1, 2, 3});
+            statement.executeUpdate();
+        }
+    }
+
+    private static void insertAdminSession(
+            Connection connection,
+            String tokenHash,
+            UUID userId,
+            String csrfTokenHash,
+            String lifetime
+    ) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                INSERT INTO iam_session (
+                    token_hash, user_id, csrf_token_hash, expires_at
+                ) VALUES (?, ?, ?, now() + ?::interval)
+                """)) {
+            statement.setString(1, tokenHash);
+            statement.setObject(2, userId);
+            statement.setString(3, csrfTokenHash);
+            statement.setString(4, lifetime);
             statement.executeUpdate();
         }
     }
