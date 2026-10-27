@@ -14,13 +14,18 @@ public final class ApiTargetResolutionException extends RuntimeException {
             Throwable cause
     ) {
         super(Objects.requireNonNull(message, "message"), cause);
-        if (!"UPSTREAM_CONFIGURATION_ERROR".equals(code) || retryable) {
+        if ("UPSTREAM_CONFIGURATION_ERROR".equals(code) && !retryable) {
+            this.code = code;
+            this.retryable = false;
+            return;
+        }
+        if (!"TARGET_STORE_UNAVAILABLE".equals(code) || !retryable) {
             throw new IllegalArgumentException(
                     "unsupported target resolution error mapping"
             );
         }
         this.code = code;
-        this.retryable = false;
+        this.retryable = true;
     }
 
     public String code() {

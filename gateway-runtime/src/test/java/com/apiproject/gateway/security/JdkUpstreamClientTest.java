@@ -13,25 +13,27 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class JdkUpstreamClientTest {
 
     private HttpServer server;
+    private ExecutorService executor;
     private URI baseUri;
     private JdkUpstreamClient client;
 
     @BeforeEach
     void setUp() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.setExecutor(Executors.newCachedThreadPool());
+        executor = Executors.newCachedThreadPool();
+        server.setExecutor(executor);
         server.createContext("/echo", exchange -> respondEcho(exchange));
         server.createContext("/large", exchange -> {
-            byte[] body = "x".repeat(64).getBytes(StandardCharsets.UTF_8);
+            byte[] body = "x".repeat(1024).getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             exchange.getResponseBody().write(body);
             exchange.close();
@@ -50,13 +52,16 @@ class JdkUpstreamClientTest {
         baseUri = URI.create(
                 "http://127.0.0.1:" + server.getAddress().getPort()
         );
-        client = new JdkUpstreamClient(32);
+        client = new JdkUpstreamClient(256);
     }
 
     @AfterEach
     void tearDown() {
         if (server != null) {
             server.stop(0);
+        }
+        if (executor != null) {
+            executor.shutdownNow();
         }
     }
 
@@ -80,7 +85,7 @@ class JdkUpstreamClientTest {
         );
         assertEquals(
                 "application/json",
-                response.headers().get("Content-Type").get(0)
+                response.headers().get("content-type").get(0)
         );
     }
 

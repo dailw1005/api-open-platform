@@ -576,7 +576,7 @@ class RuntimeHmacIntegrationTest {
 
         @Bean
         @Primary
-        ApiTargetResolver apiTargetResolver() {
+        ApiTargetResolver testApiTargetResolver() {
             return api -> new ApiTarget(
                     URI.create("https://upstream.example.test"),
                     "GET",
@@ -587,7 +587,7 @@ class RuntimeHmacIntegrationTest {
 
         @Bean
         @Primary
-        UpstreamClient upstreamClient() {
+        UpstreamClient testUpstreamClient() {
             return request -> new UpstreamResponse(
                     200,
                     Map.of("Content-Type", java.util.List.of("text/plain")),

@@ -2,6 +2,8 @@ package com.apiproject.gateway.security;
 
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -35,6 +37,39 @@ class AuthorizedApiRouteTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> authorizedApi(Map.of("id", "has/slash"))
+        );
+    }
+
+    @Test
+    void apiTargetRejectsLocalAndPrivateLiteralHosts() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> target("https://localhost/internal")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> target("https://127.0.0.1/internal")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> target("https://10.0.0.8/internal")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> target("https://169.254.169.254/latest")
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> target("https://[::1]/internal")
+        );
+    }
+
+    private ApiTarget target(String baseUri) {
+        return new ApiTarget(
+                URI.create(baseUri),
+                "GET",
+                "/internal",
+                Duration.ofSeconds(1)
         );
     }
 

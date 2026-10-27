@@ -8,11 +8,13 @@ import com.apiproject.app.security.JdbcPostAuthPolicyResolver;
 import com.apiproject.app.security.JdbcApiTargetResolver;
 import com.apiproject.gateway.security.ActiveCredentialResolver;
 import com.apiproject.gateway.security.ApiAuthorizationGate;
+import com.apiproject.gateway.security.ApiProxyFilter;
 import com.apiproject.gateway.security.ApiTargetResolver;
 import com.apiproject.gateway.security.HmacAuthenticationFilter;
 import com.apiproject.gateway.security.HmacRequestAuthenticator;
 import com.apiproject.gateway.security.HmacVerifier;
 import com.apiproject.gateway.security.JedisNonceReplayStore;
+import com.apiproject.gateway.security.JdkUpstreamClient;
 import com.apiproject.gateway.security.NonceReplayGuard;
 import com.apiproject.gateway.security.NonceReplayStore;
 import com.apiproject.gateway.security.PolicyPostAuthLimitGate;
@@ -22,6 +24,7 @@ import com.apiproject.gateway.security.PostAuthRateLimiter;
 import com.apiproject.gateway.security.PreAuthRateLimiter;
 import com.apiproject.gateway.security.RedisPostAuthRateLimiter;
 import com.apiproject.gateway.security.RedisPreAuthRateLimiter;
+import com.apiproject.gateway.security.UpstreamClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -98,6 +101,11 @@ public class RuntimeSecurityConfiguration {
     }
 
     @Bean
+    UpstreamClient upstreamClient() {
+        return new JdkUpstreamClient();
+    }
+
+    @Bean
     PostAuthPolicyResolver postAuthPolicyResolver(
             DataSource dataSource,
             PostAuthLimitProperties properties
@@ -166,6 +174,25 @@ public class RuntimeSecurityConfiguration {
         ));
         registration.addUrlPatterns("/*");
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 20);
+        return registration;
+    }
+
+    @Bean
+    FilterRegistrationBean<ApiProxyFilter> apiProxyFilter(
+            ApiTargetResolver targetResolver,
+            UpstreamClient upstreamClient,
+            ObjectMapper objectMapper
+    ) {
+        FilterRegistrationBean<ApiProxyFilter> registration =
+                new FilterRegistrationBean<>();
+        registration.setName("apiProxyFilter");
+        registration.setFilter(new ApiProxyFilter(
+                targetResolver,
+                upstreamClient,
+                objectMapper
+        ));
+        registration.addUrlPatterns("/*");
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 30);
         return registration;
     }
 }

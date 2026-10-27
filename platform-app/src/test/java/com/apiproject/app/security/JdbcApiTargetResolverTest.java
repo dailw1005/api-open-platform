@@ -118,7 +118,8 @@ class JdbcApiTargetResolverTest {
                 () -> resolver.resolve(AUTHORIZED_API)
         );
 
-        assertEquals("UPSTREAM_CONFIGURATION_ERROR", exception.code());
+        assertEquals("TARGET_STORE_UNAVAILABLE", exception.code());
+        assertEquals(true, exception.retryable());
         assertFalse(exception.getMessage().contains("database secret"));
     }
 }

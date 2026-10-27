@@ -2,6 +2,9 @@ package com.apiproject.gateway.security;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -20,6 +23,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class ApiProxyFilterTest {
 
@@ -201,7 +206,7 @@ class ApiProxyFilterTest {
                         "/items/{missing}",
                         Duration.ofSeconds(1)
                 ),
-                request -> {
+                upstream -> {
                     throw new AssertionError("upstream must not run");
                 },
                 objectMapper
@@ -217,6 +222,241 @@ class ApiProxyFilterTest {
 
         JsonNode error = assertError(response, chain, 502, "UPSTREAM_ERROR");
         assertFalse(error.get("retryable").asBoolean());
+    }
+
+    @Test
+    void nonPublicAndNonHttpRequestsPassThrough() throws Exception {
+        ApiProxyFilter filter = filterReturning(
+                new UpstreamResponse(200, Map.of(), new byte[0])
+        );
+        MockHttpServletRequest nonPublic = new MockHttpServletRequest(
+                "GET",
+                "/platform-admin/v1/apis"
+        );
+        nonPublic.setRequestURI("/platform-admin/v1/apis");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(nonPublic, response, chain);
+
+        assertEquals(nonPublic, chain.getRequest());
+
+        ServletRequest nonHttpRequest = mock(ServletRequest.class);
+        ServletResponse nonHttpResponse = mock(ServletResponse.class);
+        FilterChain nonHttpChain = mock(FilterChain.class);
+        filter.doFilter(
+                nonHttpRequest,
+                nonHttpResponse,
+                nonHttpChain
+        );
+        verify(nonHttpChain).doFilter(nonHttpRequest, nonHttpResponse);
+    }
+
+    @Test
+    void missingRequestIdIsGeneratedAndUpstreamClientErrorsAreMapped()
+            throws Exception {
+        ApiProxyFilter targetFailure = new ApiProxyFilter(
+                api -> {
+                    throw new ApiTargetResolutionException(
+                            "UPSTREAM_CONFIGURATION_ERROR",
+                            false,
+                            "invalid",
+                            null
+                    );
+                },
+                upstream -> {
+                    throw new AssertionError("upstream must not run");
+                },
+                objectMapper
+        );
+        MockHttpServletRequest request = request(
+                "GET",
+                "/open/v1/items/item-123",
+                null
+        );
+        request.removeAttribute(HmacAuthenticationFilter.REQUEST_ID_ATTRIBUTE);
+        MockHttpServletResponse targetResponse = new MockHttpServletResponse();
+        MockFilterChain targetChain = new MockFilterChain();
+
+        targetFailure.doFilter(request, targetResponse, targetChain);
+
+        assertTrue(targetResponse.getHeader("X-Request-Id") != null);
+        assertEquals(502, targetResponse.getStatus());
+
+        ApiProxyFilter targetUnavailable = new ApiProxyFilter(
+                api -> {
+                    throw new ApiTargetResolutionException(
+                            "TARGET_STORE_UNAVAILABLE",
+                            true,
+                            "database down",
+                            null
+                    );
+                },
+                upstream -> {
+                    throw new AssertionError("upstream must not run");
+                },
+                objectMapper
+        );
+        MockHttpServletResponse unavailableResponse =
+                new MockHttpServletResponse();
+        MockFilterChain unavailableChain = new MockFilterChain();
+        targetUnavailable.doFilter(
+                request("GET", "/open/v1/items/item-123", null),
+                unavailableResponse,
+                unavailableChain
+        );
+        JsonNode unavailableError = assertError(
+                unavailableResponse,
+                unavailableChain,
+                503,
+                "TARGET_STORE_UNAVAILABLE"
+        );
+        assertTrue(unavailableError.get("retryable").asBoolean());
+
+        ApiProxyFilter transportFailure = new ApiProxyFilter(
+                api -> target(),
+                upstream -> {
+                    throw new UpstreamClientException(
+                            UpstreamClientException.Code.TRANSPORT,
+                            "transport",
+                            null
+                    );
+                },
+                objectMapper
+        );
+        MockHttpServletResponse transportResponse = new MockHttpServletResponse();
+        MockFilterChain transportChain = new MockFilterChain();
+        transportFailure.doFilter(
+                request("GET", "/open/v1/items/item-123", null),
+                transportResponse,
+                transportChain
+        );
+        assertError(
+                transportResponse,
+                transportChain,
+                502,
+                "UPSTREAM_ERROR"
+        );
+
+        ApiProxyFilter tooLarge = new ApiProxyFilter(
+                api -> target(),
+                upstream -> {
+                    throw new UpstreamClientException(
+                            UpstreamClientException.Code.RESPONSE_TOO_LARGE,
+                            "large",
+                            null
+                    );
+                },
+                objectMapper
+        );
+        MockHttpServletResponse largeResponse = new MockHttpServletResponse();
+        MockFilterChain largeChain = new MockFilterChain();
+        tooLarge.doFilter(
+                request("GET", "/open/v1/items/item-123", null),
+                largeResponse,
+                largeChain
+        );
+        JsonNode largeError = assertError(
+                largeResponse,
+                largeChain,
+                502,
+                "UPSTREAM_ERROR"
+        );
+        assertFalse(largeError.get("retryable").asBoolean());
+    }
+
+    @Test
+    void upstreamClientErrorsMapToServerErrorAndFourXxPassesThrough()
+            throws Exception {
+        ApiProxyFilter unexpected = new ApiProxyFilter(
+                api -> target(),
+                upstream -> {
+                    throw new IllegalStateException("unexpected");
+                },
+                objectMapper
+        );
+        MockHttpServletResponse unexpectedResponse = new MockHttpServletResponse();
+        MockFilterChain unexpectedChain = new MockFilterChain();
+        unexpected.doFilter(
+                request("GET", "/open/v1/items/item-123", null),
+                unexpectedResponse,
+                unexpectedChain
+        );
+        assertError(
+                unexpectedResponse,
+                unexpectedChain,
+                500,
+                "INTERNAL_ERROR"
+        );
+
+        ApiProxyFilter passThrough = filterReturning(
+                new UpstreamResponse(
+                        404,
+                        Map.of("Content-Type", List.of("application/json")),
+                        bytes("{\"upstream\":\"missing\"}")
+                )
+        );
+        MockHttpServletResponse passResponse = new MockHttpServletResponse();
+        MockFilterChain passChain = new MockFilterChain();
+        passThrough.doFilter(
+                request("GET", "/open/v1/items/item-123", null),
+                passResponse,
+                passChain
+        );
+
+        assertNull(passChain.getRequest());
+        assertEquals(404, passResponse.getStatus());
+        assertEquals("{\"upstream\":\"missing\"}", passResponse.getContentAsString());
+    }
+
+    @Test
+    void oversizedBodyAndWrongAuthorizedAttributeFailClosed()
+            throws Exception {
+        ApiProxyFilter filter = new ApiProxyFilter(
+                api -> target(),
+                request -> {
+                    throw new AssertionError("upstream must not run");
+                },
+                objectMapper
+        );
+        MockHttpServletRequest oversized = request(
+                "POST",
+                "/open/v1/items/item-123",
+                null
+        );
+        oversized.setContent(new byte[HmacAuthenticationFilter.MAX_BODY_BYTES + 1]);
+        MockHttpServletResponse oversizedResponse = new MockHttpServletResponse();
+        MockFilterChain oversizedChain = new MockFilterChain();
+
+        filter.doFilter(oversized, oversizedResponse, oversizedChain);
+
+        assertError(
+                oversizedResponse,
+                oversizedChain,
+                413,
+                "REQUEST_TOO_LARGE"
+        );
+
+        MockHttpServletRequest wrongAttribute = request(
+                "GET",
+                "/open/v1/items/item-123",
+                null
+        );
+        wrongAttribute.setAttribute(
+                HmacAuthenticationFilter.AUTHORIZED_API_ATTRIBUTE,
+                "wrong-type"
+        );
+        MockHttpServletResponse wrongResponse = new MockHttpServletResponse();
+        MockFilterChain wrongChain = new MockFilterChain();
+
+        filter.doFilter(wrongAttribute, wrongResponse, wrongChain);
+
+        assertError(
+                wrongResponse,
+                wrongChain,
+                500,
+                "INTERNAL_CONFIGURATION"
+        );
     }
 
     private ApiProxyFilter filterReturning(UpstreamResponse upstreamResponse) {

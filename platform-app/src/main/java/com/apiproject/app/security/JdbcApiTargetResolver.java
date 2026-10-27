@@ -63,7 +63,14 @@ public final class JdbcApiTargetResolver implements ApiTargetResolver {
             }
         } catch (ApiTargetResolutionException exception) {
             throw exception;
-        } catch (SQLException | IllegalArgumentException exception) {
+        } catch (SQLException exception) {
+            throw new ApiTargetResolutionException(
+                    "TARGET_STORE_UNAVAILABLE",
+                    true,
+                    "Published upstream target store is unavailable",
+                    exception
+            );
+        } catch (IllegalArgumentException exception) {
             throw configurationError(
                     "Published upstream target is invalid",
                     exception
