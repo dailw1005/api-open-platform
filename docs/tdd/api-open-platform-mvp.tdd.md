@@ -255,7 +255,7 @@
 | Staging post-auth smoke harness | n/a | `c157dff` | Real staging execution remains blocked |
 | Route templates and target lookup | `8023928` | `8e446be` | V5 route signature and target function |
 | Single API proxy | `24c0409` | `1ba8503` | Header allowlist, SSRF baseline, 502/504; `75d31b9` root-locale normalization |
-| Admin session persistence | `c91b87d` | current GREEN checkpoint | V6 hash-only sessions and JDBC adapters |
+| Admin session persistence | `c91b87d` | `9986f3c` | V6 hash-only sessions and JDBC adapters |
 
 ## Final Verification
 
