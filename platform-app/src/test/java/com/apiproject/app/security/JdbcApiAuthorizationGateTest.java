@@ -10,6 +10,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -55,6 +56,8 @@ class JdbcApiAuthorizationGateTest {
         when(resultSet.getObject("api_version_id", UUID.class)).thenReturn(VERSION_ID);
         when(resultSet.getObject("tenant_id", UUID.class)).thenReturn(TENANT_ID);
         when(resultSet.getString("visibility")).thenReturn("PLATFORM_PUBLIC");
+        when(resultSet.getString("route_params"))
+                .thenReturn("{\"orderId\":\"order-123\"}");
 
         AuthorizedApi api = gate.authorize(APP_KEY, "GET", "/open/v1/orders");
 
@@ -63,6 +66,7 @@ class JdbcApiAuthorizationGateTest {
         assertEquals(VERSION_ID, api.apiVersionId());
         assertEquals(TENANT_ID, api.tenantId());
         assertEquals("PLATFORM_PUBLIC", api.visibility());
+        assertEquals(Map.of("orderId", "order-123"), api.routeParameters());
     }
 
     @Test
@@ -94,6 +98,7 @@ class JdbcApiAuthorizationGateTest {
         when(resultSet.getObject("api_version_id", UUID.class)).thenReturn(VERSION_ID);
         when(resultSet.getObject("tenant_id", UUID.class)).thenReturn(TENANT_ID);
         when(resultSet.getString("visibility")).thenReturn("PLATFORM_PUBLIC");
+        when(resultSet.getString("route_params")).thenReturn("{}");
 
         ApiAuthorizationException exception = assertThrows(
                 ApiAuthorizationException.class,
@@ -114,6 +119,25 @@ class JdbcApiAuthorizationGateTest {
 
         assertEquals("AUTHORIZATION_STORE_UNAVAILABLE", exception.code());
         assertTrue(exception.retryable());
+    }
+
+    @Test
+    void malformedRouteParametersFailClosed() throws Exception {
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getString("decision")).thenReturn("ALLOWED");
+        when(resultSet.getObject("app_id", UUID.class)).thenReturn(APP_ID);
+        when(resultSet.getObject("api_id", UUID.class)).thenReturn(API_ID);
+        when(resultSet.getObject("api_version_id", UUID.class)).thenReturn(VERSION_ID);
+        when(resultSet.getObject("tenant_id", UUID.class)).thenReturn(TENANT_ID);
+        when(resultSet.getString("visibility")).thenReturn("PLATFORM_PUBLIC");
+        when(resultSet.getString("route_params")).thenReturn("[]");
+
+        ApiAuthorizationException exception = assertThrows(
+                ApiAuthorizationException.class,
+                () -> gate.authorize(APP_KEY, "GET", "/open/v1/orders")
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
     }
 
     private void assertDecision(String decision, boolean retryable) throws Exception {

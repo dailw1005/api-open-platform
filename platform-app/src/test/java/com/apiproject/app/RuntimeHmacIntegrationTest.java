@@ -406,6 +406,11 @@ class RuntimeHmacIntegrationTest {
                 ON FUNCTION auth_resolve_post_auth_policies(uuid,uuid)
                 TO gateway_staging
                 """);
+        ADMIN_JDBC.execute("""
+                GRANT EXECUTE
+                ON FUNCTION auth_resolve_api_target(uuid,uuid)
+                TO gateway_staging
+                """);
         return true;
     }
 

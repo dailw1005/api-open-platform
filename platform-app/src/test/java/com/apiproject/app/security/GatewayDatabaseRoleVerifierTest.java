@@ -55,6 +55,7 @@ class GatewayDatabaseRoleVerifierTest {
         assertTrue(status.credentialFunctionExecute());
         assertTrue(status.authorizationFunctionExecute());
         assertTrue(status.policyFunctionExecute());
+        assertTrue(status.targetFunctionExecute());
     }
 
     @Test
@@ -155,6 +156,27 @@ class GatewayDatabaseRoleVerifierTest {
         assertTrue(exception.getMessage().contains("policy"));
     }
 
+    @Test
+    void rejectsGatewayRoleWithoutTargetResolutionExecute() throws Exception {
+        createRole(
+                "gateway_no_target_function",
+                "LOGIN PASSWORD 'test-password'"
+        );
+        grantAuthenticationFunctionsWithoutTarget(
+                "gateway_no_target_function"
+        );
+
+        GatewayDatabaseRoleVerifier verifier =
+                verifierFor("gateway_no_target_function");
+
+        CredentialResolutionException exception = assertThrows(
+                CredentialResolutionException.class,
+                verifier::verify
+        );
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+        assertTrue(exception.getMessage().contains("target"));
+    }
+
     private static void createRole(String roleName, String attributes)
             throws SQLException {
         try (Connection connection = adminDataSource.getConnection();
@@ -183,6 +205,11 @@ class GatewayDatabaseRoleVerifierTest {
                             + "auth_resolve_post_auth_policies(uuid,uuid) "
                             + "TO " + roleName
             );
+            statement.execute(
+                    "GRANT EXECUTE ON FUNCTION "
+                            + "auth_resolve_api_target(uuid,uuid) "
+                            + "TO " + roleName
+            );
         }
     }
 
@@ -201,6 +228,20 @@ class GatewayDatabaseRoleVerifierTest {
                     "GRANT EXECUTE ON FUNCTION "
                             + "auth_authorize_public_api(text,text,text) "
                             + "TO " + roleName
+            );
+        }
+    }
+
+    private static void grantAuthenticationFunctionsWithoutTarget(
+            String roleName
+    ) throws SQLException {
+        grantFunctionOnly(roleName);
+        try (Connection connection = adminDataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute(
+                    "REVOKE EXECUTE ON FUNCTION "
+                            + "auth_resolve_api_target(uuid,uuid) "
+                            + "FROM " + roleName
             );
         }
     }

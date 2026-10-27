@@ -17,13 +17,24 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ApiAuthorizationLookupTest {
 
     private static final String FUNCTION_CALL = """
-            SELECT decision, app_id, api_id, api_version_id, visibility
+            SELECT
+                decision, app_id, api_id, api_version_id, visibility,
+                route_params
             FROM auth_authorize_public_api(?, ?, ?)
+            """;
+    private static final String TARGET_FUNCTION_CALL = """
+            SELECT
+                upstream_method,
+                upstream_path_template,
+                base_url,
+                timeout_ms
+            FROM auth_resolve_api_target(?, ?)
             """;
     private static final String POLICY_FUNCTION_CALL = """
             SELECT
@@ -77,6 +88,120 @@ class ApiAuthorizationLookupTest {
         assertEquals(fixture.apiId(), decision.apiId());
         assertEquals(fixture.apiVersionId(), decision.apiVersionId());
         assertEquals("PLATFORM_PUBLIC", decision.visibility());
+        assertEquals("{}", decision.routeParams());
+    }
+
+    @Test
+    void literalRouteWinsOverTemplateRoute() throws Exception {
+        FixtureIdentity owner = insertOwner();
+        Fixture literal = insertApiForOwnerAtPath(
+                owner,
+                "PLATFORM_PUBLIC",
+                true,
+                "ACTIVE",
+                "/open/v1/route-users/me"
+        );
+        insertApiForOwnerAtPath(
+                owner,
+                "PLATFORM_PUBLIC",
+                true,
+                "ACTIVE",
+                "/open/v1/route-users/{userId}"
+        );
+
+        Decision decision = authorize(
+                owner.appKey(),
+                "GET",
+                "/open/v1/route-users/me"
+        );
+
+        assertEquals("ALLOWED", decision.code());
+        assertEquals(literal.apiId(), decision.apiId());
+        assertEquals("{}", decision.routeParams());
+    }
+
+    @Test
+    void templateRouteExtractsSafePathParameters() throws Exception {
+        FixtureIdentity owner = insertOwner();
+        Fixture template = insertApiForOwnerAtPath(
+                owner,
+                "PLATFORM_PUBLIC",
+                true,
+                "ACTIVE",
+                "/open/v1/route-items/{itemId}"
+        );
+
+        Decision decision = authorize(
+                owner.appKey(),
+                "GET",
+                "/open/v1/route-items/item-123_ok"
+        );
+        Decision unsafe = authorize(
+                owner.appKey(),
+                "GET",
+                "/open/v1/route-items/item%2F123"
+        );
+
+        assertEquals("ALLOWED", decision.code());
+        assertEquals(template.apiId(), decision.apiId());
+        assertTrue(decision.routeParams().contains("\"itemId\": \"item-123_ok\""));
+        assertEquals("API_NOT_FOUND", unsafe.code());
+    }
+
+    @Test
+    void rejectsAmbiguousRouteShapesAndDuplicateParameterNames()
+            throws Exception {
+        FixtureIdentity owner = insertOwner();
+        insertApiForOwnerAtPath(
+                owner,
+                "PLATFORM_PUBLIC",
+                true,
+                "ACTIVE",
+                "/open/v1/ambiguous/{id}"
+        );
+
+        assertThrows(
+                SQLException.class,
+                () -> insertApiForOwnerAtPath(
+                        owner,
+                        "PLATFORM_PUBLIC",
+                        true,
+                        "ACTIVE",
+                        "/open/v1/ambiguous/{name}"
+                )
+        );
+        assertThrows(
+                SQLException.class,
+                () -> insertApiForOwnerAtPath(
+                        owner,
+                        "PLATFORM_PUBLIC",
+                        true,
+                        "ACTIVE",
+                        "/open/v1/duplicate/{id}/{id}"
+                )
+        );
+    }
+
+    @Test
+    void resolvesActivePublishedProxyTarget() throws Exception {
+        FixtureIdentity owner = insertOwner();
+        Fixture api = insertApiForOwnerAtPath(
+                owner,
+                "PLATFORM_PUBLIC",
+                true,
+                "ACTIVE",
+                "/open/v1/target/{itemId}"
+        );
+        UUID endpointId = UUID.randomUUID();
+        insertUpstreamTarget(owner, endpointId);
+        updateApiVersionUpstreamEndpoint(api.apiVersionId(), endpointId);
+
+        Target target = resolveTarget(api.apiId(), api.apiVersionId());
+
+        assertEquals("PATCH", target.method());
+        assertEquals("/upstream/items/{itemId}", target.pathTemplate());
+        assertEquals("https://upstream.example.test/v1", target.baseUrl());
+        assertEquals(1_500, target.timeoutMs());
     }
 
     @Test
@@ -273,7 +398,8 @@ class ApiAuthorizationLookupTest {
                         resultSet.getObject(2, UUID.class),
                         resultSet.getObject(3, UUID.class),
                         resultSet.getObject(4, UUID.class),
-                        resultSet.getString(5)
+                        resultSet.getString(5),
+                        resultSet.getString(6)
                 );
                 assertFalse(resultSet.next());
                 return decision;
@@ -288,6 +414,22 @@ class ApiAuthorizationLookupTest {
     ) throws SQLException {
         FixtureIdentity owner = insertOwner();
         return insertApiForOwner(owner, visibility, grant, grantStatus);
+    }
+
+    private static Fixture insertApiForOwnerAtPath(
+            FixtureIdentity owner,
+            String visibility,
+            boolean grant,
+            String grantStatus,
+            String publicPath
+    ) throws SQLException {
+        return insertApiForOwner(
+                owner,
+                visibility,
+                grant,
+                grantStatus,
+                publicPath
+        );
     }
 
     private static Fixture insertForeignPrivateFixture() throws SQLException {
@@ -335,6 +477,25 @@ class ApiAuthorizationLookupTest {
             boolean grant,
             String grantStatus
     ) throws SQLException {
+        String publicPath = "TENANT_PRIVATE".equals(visibility)
+                ? "/open/v1/private/" + UUID.randomUUID()
+                : "/open/v1/orders/" + UUID.randomUUID();
+        return insertApiForOwner(
+                owner,
+                visibility,
+                grant,
+                grantStatus,
+                publicPath
+        );
+    }
+
+    private static Fixture insertApiForOwner(
+            FixtureIdentity owner,
+            String visibility,
+            boolean grant,
+            String grantStatus,
+            String publicPath
+    ) throws SQLException {
         UUID apiId = UUID.randomUUID();
         UUID versionId = UUID.randomUUID();
         UUID publicationId = UUID.randomUUID();
@@ -345,9 +506,7 @@ class ApiAuthorizationLookupTest {
                     owner.userId(),
                     apiId,
                     visibility,
-                    "TENANT_PRIVATE".equals(visibility)
-                            ? "/open/v1/private/" + apiId
-                            : "/open/v1/orders/" + apiId
+                    publicPath
             );
             insertApiVersion(connection, apiId, owner.userId(), versionId);
             insertPublication(
@@ -369,9 +528,7 @@ class ApiAuthorizationLookupTest {
                 owner.appId(),
                 apiId,
                 versionId,
-                "TENANT_PRIVATE".equals(visibility)
-                        ? "/open/v1/private/" + apiId
-                        : "/open/v1/orders/" + apiId
+                publicPath
         );
     }
 
@@ -418,6 +575,85 @@ class ApiAuthorizationLookupTest {
                 assertFalse(resultSet.next());
                 return policy;
             }
+        }
+    }
+
+    private static Target resolveTarget(
+            UUID apiId,
+            UUID apiVersionId
+    ) throws SQLException {
+        try (Connection connection = runtimeConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     TARGET_FUNCTION_CALL
+             )) {
+            statement.setObject(1, apiId);
+            statement.setObject(2, apiVersionId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                assertTrue(resultSet.next());
+                Target target = new Target(
+                        resultSet.getString("upstream_method"),
+                        resultSet.getString("upstream_path_template"),
+                        resultSet.getString("base_url"),
+                        resultSet.getInt("timeout_ms")
+                );
+                assertFalse(resultSet.next());
+                return target;
+            }
+        }
+    }
+
+    private static void insertUpstreamTarget(
+            FixtureIdentity owner,
+            UUID endpointId
+    ) throws SQLException {
+        try (Connection connection = dataSource.getConnection()) {
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    INSERT INTO upstream_endpoint (
+                        id, owner_tenant_id, code, name, method,
+                        path_template, status
+                    ) VALUES (?, ?, ?, ?, 'PATCH', ?, 'ACTIVE')
+                    """)) {
+                String suffix = endpointId.toString().substring(0, 8);
+                statement.setObject(1, endpointId);
+                statement.setObject(2, owner.tenantId());
+                statement.setString(3, "upstream-" + suffix);
+                statement.setString(4, "Upstream " + suffix);
+                statement.setString(5, "/upstream/items/{itemId}");
+                statement.executeUpdate();
+            }
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    INSERT INTO upstream_environment (
+                        owner_tenant_id, endpoint_id, environment, version,
+                        base_url, auth_ref, egress_zone, tls_policy, status
+                    ) VALUES (
+                        ?, ?, 'PROD', 1, 'https://upstream.example.test/v1',
+                        NULL, 'DEFAULT', 'TLS_1_2_STRICT', 'ACTIVE'
+                    )
+                    """)) {
+                statement.setObject(1, owner.tenantId());
+                statement.setObject(2, endpointId);
+                statement.executeUpdate();
+            }
+        }
+    }
+
+    private static void updateApiVersionUpstreamEndpoint(
+            UUID versionId,
+            UUID endpointId
+    ) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     UPDATE api_version
+                     SET timeout_ms = 1500,
+                         config_json = jsonb_build_object(
+                             'upstreamEndpointId',
+                             ?
+                         )
+                     WHERE id = ?
+                     """)) {
+            statement.setString(1, endpointId.toString());
+            statement.setObject(2, versionId);
+            statement.executeUpdate();
         }
     }
 
@@ -505,6 +741,9 @@ class ApiAuthorizationLookupTest {
                         TO app_runtime;
                     GRANT EXECUTE
                         ON FUNCTION auth_resolve_post_auth_policies(uuid, uuid)
+                        TO app_runtime;
+                    GRANT EXECUTE
+                        ON FUNCTION auth_resolve_api_target(uuid, uuid)
                         TO app_runtime;
                     """);
         }
@@ -727,7 +966,16 @@ class ApiAuthorizationLookupTest {
             UUID appId,
             UUID apiId,
             UUID apiVersionId,
-            String visibility
+            String visibility,
+            String routeParams
+    ) {
+    }
+
+    private record Target(
+            String method,
+            String pathTemplate,
+            String baseUrl,
+            int timeoutMs
     ) {
     }
 
