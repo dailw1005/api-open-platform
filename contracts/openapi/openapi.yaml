@@ -49,6 +49,8 @@ paths:
           headers:
             Set-Cookie:
               $ref: "#/components/headers/SessionCookie"
+            X-CSRF-Token:
+              $ref: "#/components/headers/CsrfToken"
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
           content:
@@ -115,6 +117,8 @@ paths:
           headers:
             Set-Cookie:
               $ref: "#/components/headers/SessionCookie"
+            X-CSRF-Token:
+              $ref: "#/components/headers/CsrfToken"
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
           content:
@@ -2653,6 +2657,10 @@ components:
         format: uuid
     SessionCookie:
       description: Secure server-side session cookie.
+      schema:
+        type: string
+    CsrfToken:
+      description: Per-session CSRF token required for state-changing requests.
       schema:
         type: string
     RateLimitLimit:
