@@ -1,11 +1,14 @@
 package com.apiproject.app;
 
 import com.apiproject.app.security.CredentialSecretDecryptor;
+import com.apiproject.gateway.security.ApiTarget;
+import com.apiproject.gateway.security.ApiTargetResolver;
 import com.apiproject.gateway.security.HmacCanonicalRequest;
 import com.apiproject.gateway.security.HmacCanonicalizer;
 import com.apiproject.gateway.security.HmacAuthenticationFilter;
+import com.apiproject.gateway.security.UpstreamClient;
+import com.apiproject.gateway.security.UpstreamResponse;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
-import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.flywaydb.core.Flyway;
@@ -17,8 +20,6 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
 import redis.embedded.RedisServer;
 
 import javax.sql.DataSource;
@@ -29,8 +30,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -59,6 +62,8 @@ class RuntimeHmacIntegrationTest {
             UUID.fromString("10000000-0000-0000-0000-000000000004");
     private static final UUID PROBE_OWNER_USER_ID =
             UUID.fromString("10000000-0000-0000-0000-000000000005");
+    private static final String PROBE_REQUEST_PATH =
+            "/open/v1/probe/probe-123";
     private static final EmbeddedPostgres POSTGRES = startPostgres();
     private static final DataSource ADMIN_DATA_SOURCE = POSTGRES.getPostgresDatabase();
     private static final JdbcTemplate ADMIN_JDBC = new JdbcTemplate(ADMIN_DATA_SOURCE);
@@ -141,7 +146,9 @@ class RuntimeHmacIntegrationTest {
         );
 
         assertEquals(200, success.statusCode(), success.body());
-        assertTrue(success.body().contains(appKey));
+        assertTrue(success.body().contains(
+                "https://upstream.example.test/upstream/probe-123"
+        ));
         assertTrue(success.headers().firstValue("X-Request-Id").isPresent());
         assertEquals(
                 "2",
@@ -272,7 +279,9 @@ class RuntimeHmacIntegrationTest {
             String signature
     ) {
         return HttpRequest.newBuilder()
-                .uri(URI.create("http://127.0.0.1:" + serverPort + "/open/v1/probe"))
+                .uri(URI.create(
+                        "http://127.0.0.1:" + serverPort + PROBE_REQUEST_PATH
+                ))
                 .GET()
                 .header("X-Signature-Version", "v1")
                 .header("X-App-Key", appKey)
@@ -293,7 +302,7 @@ class RuntimeHmacIntegrationTest {
                         appKey,
                         "GET",
                         host,
-                        "/open/v1/probe",
+                        PROBE_REQUEST_PATH,
                         null,
                         null,
                         timestamp,
@@ -472,7 +481,8 @@ class RuntimeHmacIntegrationTest {
                     id, owner_tenant_id, code, name, public_method, public_path,
                     kind, visibility, status, publish_epoch
                 ) VALUES (
-                    ?, ?, 'runtime-probe', 'Runtime Probe', 'GET', '/open/v1/probe',
+                    ?, ?, 'runtime-probe', 'Runtime Probe', 'GET',
+                    '/open/v1/probe/{probeId}',
                     'PROXY', 'PLATFORM_PUBLIC', 'PUBLISHED', 1
                 )
                 """,
@@ -565,27 +575,24 @@ class RuntimeHmacIntegrationTest {
         }
 
         @Bean
-        ProbeController probeController() {
-            return new ProbeController();
-        }
-    }
-
-    @RestController
-    static class ProbeController {
-
-        @GetMapping("/open/v1/probe")
-        ProbeResponse probe(HttpServletRequest request) {
-            return new ProbeResponse(
-                    (String) request.getAttribute(
-                            HmacAuthenticationFilter.AUTHENTICATED_APP_KEY_ATTRIBUTE
-                    ),
-                    (String) request.getAttribute(
-                            HmacAuthenticationFilter.REQUEST_ID_ATTRIBUTE
-                    )
+        @Primary
+        ApiTargetResolver apiTargetResolver() {
+            return api -> new ApiTarget(
+                    URI.create("https://upstream.example.test"),
+                    "GET",
+                    "/upstream/{probeId}",
+                    Duration.ofSeconds(1)
             );
         }
-    }
 
-    record ProbeResponse(String appKey, String requestId) {
+        @Bean
+        @Primary
+        UpstreamClient upstreamClient() {
+            return request -> new UpstreamResponse(
+                    200,
+                    Map.of("Content-Type", java.util.List.of("text/plain")),
+                    request.uri().toString().getBytes(StandardCharsets.UTF_8)
+            );
+        }
     }
 }
