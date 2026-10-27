@@ -138,4 +138,132 @@ class JdbcAdminSessionStoreTest {
         assertEquals("SESSION_STORE_UNAVAILABLE", exception.code());
         assertTrue(exception.retryable());
     }
+
+    @Test
+    void createRejectsUnexpectedAffectedRowCount() throws Exception {
+        when(statement.executeUpdate()).thenReturn(0);
+
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> store.create(
+                        SESSION_HASH,
+                        new AdminSessionState(USER_ID, CSRF_HASH, EXPIRES_AT)
+                )
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void createDatabaseFailureIsRetryable() throws Exception {
+        when(statement.executeUpdate()).thenThrow(new SQLException("down"));
+
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> store.create(
+                        SESSION_HASH,
+                        new AdminSessionState(USER_ID, CSRF_HASH, EXPIRES_AT)
+                )
+        );
+
+        assertEquals("SESSION_STORE_UNAVAILABLE", exception.code());
+        assertTrue(exception.retryable());
+    }
+
+    @Test
+    void multipleSessionRowsFailClosed() throws Exception {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(statement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, true);
+        when(resultSet.getObject("user_id", UUID.class)).thenReturn(USER_ID);
+        when(resultSet.getString("csrf_token_hash")).thenReturn(CSRF_HASH);
+        when(resultSet.getTimestamp("expires_at"))
+                .thenReturn(Timestamp.from(EXPIRES_AT));
+
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> store.find(SESSION_HASH)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void malformedSessionMetadataFailsClosed() throws Exception {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(statement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getObject("user_id", UUID.class)).thenReturn(USER_ID);
+        when(resultSet.getString("csrf_token_hash"))
+                .thenReturn("not-a-hash");
+        when(resultSet.getTimestamp("expires_at"))
+                .thenReturn(Timestamp.from(EXPIRES_AT));
+
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> store.find(SESSION_HASH)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void missingSessionUserFailsClosed() throws Exception {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(statement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getString("csrf_token_hash")).thenReturn(CSRF_HASH);
+        when(resultSet.getTimestamp("expires_at"))
+                .thenReturn(Timestamp.from(EXPIRES_AT));
+
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> store.find(SESSION_HASH)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void missingSessionExpiryFailsClosed() throws Exception {
+        ResultSet resultSet = mock(ResultSet.class);
+        when(statement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getObject("user_id", UUID.class)).thenReturn(USER_ID);
+        when(resultSet.getString("csrf_token_hash")).thenReturn(CSRF_HASH);
+
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> store.find(SESSION_HASH)
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void revokeDatabaseFailureIsRetryable() throws Exception {
+        when(statement.executeUpdate()).thenThrow(new SQLException("down"));
+
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> store.revoke(SESSION_HASH)
+        );
+
+        assertEquals("SESSION_STORE_UNAVAILABLE", exception.code());
+        assertTrue(exception.retryable());
+    }
+
+    @Test
+    void nullTokenHashAndSessionStateAreRejected() {
+        AdminAuthenticationException nullToken = assertThrows(
+                AdminAuthenticationException.class,
+                () -> store.find(null)
+        );
+        assertEquals("INTERNAL_CONFIGURATION", nullToken.code());
+
+        assertThrows(
+                NullPointerException.class,
+                () -> store.create(SESSION_HASH, null)
+        );
+    }
 }

@@ -1,6 +1,6 @@
 # API 开放平台 MVP 整体方案与实施蓝图
 
-> 状态：Approved；Gate 0、FlowValidator、HMAC v1 验签/防重放、Servlet Filter、Spring Boot 运行时、AWS KMS、数据库最小权限验证、路由模板、应用/API 授权、pre/post-auth 限流、应用/API 日/月配额、单一 API 代理、Publication Guard、PostgreSQL 基础迁移均已本地 GREEN；真实 staging 尚未执行。
+> 状态：Approved；Gate 0、FlowValidator、HMAC v1 验签/防重放、Servlet Filter、Spring Boot 运行时、AWS KMS、数据库最小权限验证、路由模板、应用/API 授权、pre/post-auth 限流、应用/API 日/月配额、单一 API 代理、Publication Guard、管理员 Session 领域/持久化、PostgreSQL 基础迁移均已本地 GREEN；管理员 Session HTTP 边界和真实 staging 尚未执行。
 >
 > 范围：整体方案、数据模型、编排 DSL、安全基线、技术选型与实施切片。
 >
@@ -859,6 +859,8 @@ S4 当前已完成 HMAC 黄金向量、签名验证、时间窗、Nonce 防重�
 
 S5 当前已完成 pre-auth 每 IP Redis 固定窗口限流，以及应用/API token bucket 与 UTC 日/月调用配额。Post-auth 六维检查由单条 Redis Lua 原子执行，任一维度拒绝时不消耗其它额度；策略表含 RLS、租户归属校验和受限解析函数。剩余可信代理 IP 提取、真实 staging 多实例负载/边界验证、Redis Cluster 方案和基于 usage 的配额对账。
 
+S1 当前已完成管理员身份/角色绑定查询、密码校验端口、Session/CSRF 领域服务、V6 hash-only `iam_session` 迁移和 JDBC 持久化适配器。剩余管理员登录/登出 HTTP 接口、具体密码与 MFA 校验器、登录限速、安全 Cookie/CSRF Filter、RBAC 强制点、控制面数据库角色授权和过期 Session 清理。
+
 ## 13. 已确认默认决策
 
 以下默认决策已确认，作为后续 TDD 的固定基线：
@@ -876,8 +878,8 @@ S5 当前已完成 pre-auth 每 IP Redis 固定窗口限流，以及应用/API t
 
 ## 14. Handoff
 
-- 当前状态：方案与默认决策已确认；Gate 0、FlowValidator、HMAC verifier/replay、Servlet Filter、Spring Boot 运行时、AWS KMS decryptor、JDBC credential resolver、数据库角色验证、应用/API 授权、pre-auth 限流、Publication Guard 和 PostgreSQL 基础迁移均已通过 `mvn verify`。
+- 当前状态：方案与默认决策已确认；Gate 0、FlowValidator、HMAC verifier/replay、Servlet Filter、Spring Boot 运行时、AWS KMS decryptor、JDBC credential resolver、数据库角色验证、应用/API 授权、pre-auth 限流、Publication Guard、管理员 Session 领域/JDBC 持久化和 PostgreSQL 基础迁移均已通过 `mvn verify`。
 - 当前部署边界：本地嵌入式 Tomcat/PostgreSQL/Redis 端到端链路、受限数据库角色、模板路由、应用/API 配额和单一 API 代理已成立，但真实 staging AWS KMS/数据库角色/Redis TLS、可信代理 IP、DNS/egress、上游认证、Redis Cluster、usage 对账和编排执行尚未完成。
 - Staging 安排：`scripts/staging-security-smoke.ps1` 已提供 valid、replay、token bucket、日配额和月配额场景；当前机器无 staging URL、Secret、AWS/Redis/PostgreSQL CLI 或凭据，真实执行状态明确为 NOT EXECUTED。
-- 下一 TDD 切片：实现 KMS/Vault-backed upstream `auth_ref` 与 egress/DNS 防护，同时执行真实 staging 代理验收；随后进入 usage/audit 持久化和最小控制面/UI。
+- 下一 TDD 切片：完成管理员 Session HTTP 边界，包括 Argon2id 密码校验、MFA 失败分类、登录限速、安全 Cookie、CSRF 校验和控制面数据库最小权限；随后进入 KMS/Vault-backed upstream `auth_ref`、egress/DNS 防护与真实 staging 验收。
 - 每次切片继续执行 RED -> GREEN -> Coverage -> Security/Docs checkpoint；`mvn verify` 是统一验证命令。

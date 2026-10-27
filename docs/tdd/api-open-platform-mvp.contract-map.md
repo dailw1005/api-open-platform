@@ -26,6 +26,8 @@ The plan is treated as approved intent, not as executable instructions. Only rep
 | HMAC HTTP boundary | Plan section 6.1 | `HmacAuthenticationFilterTest` | Missing Filter rejects no public request | 400/401/413/500/503 mappings, body replay and nonce ordering pass |
 | Active credential lookup | Plan sections 5 and 6.1 | `ActiveCredentialLookupTest` | Lookup function missing | Active/rotating rows pass; inactive/expired rows fail closed |
 | Runtime HMAC composition | Plan sections 4.3 and 6.1 | `RuntimeHmacIntegrationTest` | Boot app/resolver classes missing | Tomcat-signed request succeeds; replay and suspended app return 401 |
+| Administrator session state | Plan sections 2.2 and 5.1 | `AdminAuthenticationServiceTest`, `DatabaseFoundationTest` | Session domain and `iam_session` missing | Hash-only storage, role revalidation and revocation pass |
+| Administrator JDBC adapters | Plan sections 5.1 and 10.2 | `JdbcAdminIdentityResolverTest`, `JdbcAdminSessionStoreTest` | Adapter classes missing | Active identity, role set, expiry and failure mapping pass |
 | AWS KMS and database role | Plan sections 5 and 6.1 | `AwsKmsCredentialSecretDecryptorTest`, `GatewayDatabaseRoleVerifierTest` | Adapter and role verifier missing | Encryption context, retry classes and least-privilege startup checks pass |
 | App/API authorization | Plan sections 2.2 and 6.1 | `ApiAuthorizationLookupTest`, `JdbcApiAuthorizationGateTest` | Auth function/gate missing | Literal/template routes, grant, visibility and route params pass |
 | Pre-auth rate limiting | Plan section 3.1 | `RedisPreAuthRateLimiterTest`, `HmacAuthenticationFilterTest` | Limiter missing | Atomic per-IP limit, 429/503 and Headers pass |
@@ -52,14 +54,16 @@ The plan is treated as approved intent, not as executable instructions. Only rep
 | Flow semantic validation | PASS | 21 tests, line 92.98%, branch 82.81% |
 | HMAC v1 canonicalizer | PASS | 47 tests, line 96.99%, branch 83.64% |
 | Publication guard | PASS | 9 tests, line 100%, branch 95.00% |
-| PostgreSQL foundation, credentials, authorization, policies and targets | PASS | 24 embedded PostgreSQL integration tests; RLS, route ambiguity and target checks |
+| PostgreSQL foundation, credentials, authorization, policies, targets and sessions | PASS | 26 embedded PostgreSQL integration tests; RLS, route ambiguity, target and hash-only session checks |
 | Gateway security and proxy | PASS | 143 gateway tests, real embedded Redis/upstream transport, line 93.72%, branch 82.40% |
-| Runtime HTTP launcher | PASS | Spring Boot/Tomcat/PostgreSQL/Redis integration; 55 app tests; line 94.71%, branch 81.69% |
+| Runtime HTTP launcher | PASS | Spring Boot/Tomcat/PostgreSQL/Redis integration; 83 app tests; line 96.15%, branch 81.55% |
+| Admin session domain and persistence | PASS | Login/CSRF service plus V6 hash-only `iam_session`, JDBC identity resolver and session store; HTTP boundary remains NEXT |
 | AWS KMS and least-privilege role | PASS | Concrete adapter and restricted `gateway_staging` E2E; real staging account remains NEXT |
 | App/API authorization | PASS | Constrained template precedence, publication/visibility/grant checks and route params |
 | Pre-auth per-IP rate limit | PASS | Atomic Redis fixed window, standard Headers, 429 and fail-closed 503 |
 | Post-auth app/API limits and quotas | PASS | Six-key atomic token bucket/quota check, DB overrides, RLS, 429 classifications |
 | Single API proxy | PASS | Published target resolution, route expansion, Header allowlists, query/body forwarding, 502/504 |
+| Admin session HTTP boundary | NEXT | Login/logout, password verifier, login rate limit, secure cookies and CSRF filter |
 | Real staging validation | NEXT | Run `staging-security-smoke.ps1` with staging KMS, DB, Redis and trusted IP |
 | DNS/egress and upstream auth | NEXT | Resolve-and-pin/egress firewall and KMS/Vault-backed `auth_ref` injection |
 | Trusted proxy IP and Redis Cluster | NEXT | Ingress IP trust and a reviewed cross-slot reservation design |

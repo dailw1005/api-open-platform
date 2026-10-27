@@ -126,6 +126,30 @@ class JdbcAdminIdentityResolverTest {
     }
 
     @Test
+    void blankDisplayNameFailsClosed() throws Exception {
+        stubUser();
+        when(userResult.getString("display_name")).thenReturn(" ");
+
+        assertInternalConfigurationForEmailLookup();
+    }
+
+    @Test
+    void overlongDisplayNameFailsClosed() throws Exception {
+        stubUser();
+        when(userResult.getString("display_name")).thenReturn("x".repeat(101));
+
+        assertInternalConfigurationForEmailLookup();
+    }
+
+    @Test
+    void blankPasswordHashFailsClosed() throws Exception {
+        stubUser();
+        when(userResult.getString("password_hash")).thenReturn(" ");
+
+        assertInternalConfigurationForEmailLookup();
+    }
+
+    @Test
     void roleOwnedByAnotherUserFailsClosed() throws Exception {
         stubUser();
         when(roleResult.next()).thenReturn(true, false);
@@ -160,6 +184,82 @@ class JdbcAdminIdentityResolverTest {
         assertTrue(exception.retryable());
     }
 
+    @Test
+    void blankEmailAndNullUserIdAreRejectedBeforeQuerying() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> resolver.findByEmail(null)
+        );
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> resolver.findByEmail(" ")
+        );
+        assertThrows(
+                NullPointerException.class,
+                () -> resolver.findByUserId(null)
+        );
+    }
+
+    @Test
+    void findByUserIdDatabaseFailureIsRetryable() throws Exception {
+        when(dataSource.getConnection()).thenThrow(new SQLException("down"));
+
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> resolver.findByUserId(USER_ID)
+        );
+
+        assertEquals("IDENTITY_STORE_UNAVAILABLE", exception.code());
+        assertTrue(exception.retryable());
+    }
+
+    @Test
+    void multipleUserRowsFailClosed() throws Exception {
+        stubUser();
+        when(userResult.next()).thenReturn(true, true);
+
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> resolver.findByEmail("admin@example.com")
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void roleReadFailureFailsClosed() throws Exception {
+        stubUser();
+        when(roleResult.next()).thenReturn(true);
+        when(roleResult.getObject("user_id", UUID.class))
+                .thenThrow(new SQLException("bad role"));
+
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> resolver.findByEmail("admin@example.com")
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
+    @Test
+    void unknownRoleCodeFailsClosed() throws Exception {
+        stubUser();
+        when(roleResult.next()).thenReturn(true, false);
+        when(roleResult.getObject("id", UUID.class)).thenReturn(ROLE_ID);
+        when(roleResult.getObject("user_id", UUID.class)).thenReturn(USER_ID);
+        when(roleResult.getObject("tenant_id", UUID.class))
+                .thenReturn(TENANT_ID);
+        when(roleResult.getString("role_code")).thenReturn("OWNER");
+        when(roleResult.getString("scope_type")).thenReturn("GLOBAL");
+
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> resolver.findByEmail("admin@example.com")
+        );
+
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
+    }
+
     private void stubUser() throws Exception {
         when(userResult.next()).thenReturn(true, false);
         when(userResult.getObject("id", UUID.class)).thenReturn(USER_ID);
@@ -179,5 +279,13 @@ class JdbcAdminIdentityResolverTest {
         when(roleResult.getString("role_code"))
                 .thenReturn("PLATFORM_ADMIN");
         when(roleResult.getString("scope_type")).thenReturn("GLOBAL");
+    }
+
+    private void assertInternalConfigurationForEmailLookup() {
+        AdminAuthenticationException exception = assertThrows(
+                AdminAuthenticationException.class,
+                () -> resolver.findByEmail("admin@example.com")
+        );
+        assertEquals("INTERNAL_CONFIGURATION", exception.code());
     }
 }

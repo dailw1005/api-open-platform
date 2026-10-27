@@ -6,6 +6,7 @@ The Flyway migrations establish the MySQL-independent control-plane foundation
 for:
 
 - identity and tenancy;
+- administrator server-side sessions;
 - applications and credentials;
 - API definitions, versions and production publications;
 - upstream endpoint/environment registration;
@@ -20,6 +21,8 @@ lookup function.
 policies, returns `app_id` from authorization and adds the restricted policy
 lookup function. `V5__route_templates_and_proxy_targets.sql` adds validated
 route templates, ambiguity prevention and published upstream target lookup.
+`V6__admin_sessions.sql` adds user display names and hash-only administrator
+sessions.
 
 Runtime target: PostgreSQL 16+; integration tests run against embedded PostgreSQL 18.6.
 
@@ -27,7 +30,7 @@ Runtime target: PostgreSQL 16+; integration tests run against embedded PostgreSQ
 
 | Area | Tables |
 | --- | --- |
-| Identity | `iam_tenant`, `iam_user`, `iam_role_binding` |
+| Identity | `iam_tenant`, `iam_user`, `iam_role_binding`, `iam_session` |
 | Applications | `app`, `app_credential`, `app_api_grant` |
 | Upstreams | `upstream_endpoint`, `upstream_environment` |
 | API catalogue | `api_definition`, `api_version`, `api_publication` |
@@ -39,6 +42,8 @@ Runtime target: PostgreSQL 16+; integration tests run against embedded PostgreSQ
 - Tenant child tables carry `tenant_id` and use composite foreign keys such as `(tenant_id, app_id)`.
 - RLS is enabled on tenant-owned tables; policies read `app.tenant_id` through `app_current_tenant_id()` and fail closed when it is absent.
 - An app owner must already have a role binding in the same tenant.
+- `iam_user.display_name` is non-blank and limited to 100 characters. Existing rows are backfilled from the email local part during the V6 migration.
+- `iam_session` stores only lowercase SHA-256 session and CSRF token hashes. Expiry must follow creation, and a revocation timestamp cannot precede creation.
 - A publication must belong to the same API/version, be `PROD`, and use one of `PREPARED`, `ACTIVE`, `SUPERSEDED` or `REVOKED`.
 - At most one publication per API/environment may be `ACTIVE`.
 - `api_definition.active_prod_publication_id` is validated by a trigger and cannot reference a revoked or mismatched publication.
@@ -130,6 +135,24 @@ and timeout only when:
 Malformed JSON endpoint IDs do not resolve. The runtime role receives
 `EXECUTE` and no direct upstream table access.
 
+## Administrator Sessions
+
+`iam_session` is global identity state rather than tenant-owned data. The
+control plane resolves an active user and role bindings through
+`JdbcAdminIdentityResolver`, then persists hash-only session and CSRF material
+through `JdbcAdminSessionStore`.
+
+- Raw session and CSRF tokens never enter SQL or the database.
+- Session lookup excludes rows with `revoked_at`.
+- Revocation is idempotent and uses the stored token hash.
+- User and role state is re-read for every session authentication, so disabled users and removed global administrator bindings invalidate existing sessions.
+- Database errors map to retryable store-unavailable errors; malformed rows and unexpected cardinality fail closed as internal configuration errors.
+
+This migration does not grant the control-plane database role access.
+Production role provisioning must grant access only to the intended
+control-plane login, not the public gateway role. Expired-session
+retention/cleanup and the HTTP session/CSRF boundary remain follow-up slices.
+
 ## Test Command
 
 ```bash
@@ -160,6 +183,7 @@ The tests use native embedded PostgreSQL, run Flyway, assume a non-superuser run
 - safe route parameters are extracted and unsafe encoded separators do not
   match;
 - only the active published proxy version resolves an ACTIVE PROD target.
+- administrator session rows store only valid SHA-256 hashes, enforce positive lifetime and support idempotent revocation.
 
 ## Out Of Scope
 

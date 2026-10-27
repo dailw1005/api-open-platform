@@ -221,6 +221,22 @@
 - **Result:** 265 tests, 0 failures, 0 errors, 0 skipped. Gateway line 93.72%, branch 82.40%; runtime line 94.71%, branch 81.69%.
 - **Git evidence:** route/target RED `8023928`; GREEN `8e446be`; proxy RED `24c0409`; GREEN `1ba8503`.
 
+## Admin Session Persistence Slice
+
+- **User journey:** a platform administrator can authenticate with a server-side session whose raw session and CSRF tokens are never persisted.
+- **Database RED:** `mvn -pl platform-persistence -Dtest=DatabaseFoundationTest test` failed because `iam_session` was absent. The table inventory assertion reported `Missing tables: [iam_session]`; session inserts failed with SQLState `42P01`.
+- **Adapter RED:** `mvn -pl platform-app -am "-Dtest=JdbcAdminIdentityResolverTest,JdbcAdminSessionStoreTest" "-Dsurefire.failIfNoSpecifiedTests=false" test` failed test compilation because `JdbcAdminIdentityResolver` and `JdbcAdminSessionStore` did not exist.
+- **RED checkpoint:** `c91b87d`.
+- **V6 schema:** `iam_user.display_name` is backfilled and constrained. `iam_session` stores only lowercase SHA-256 hashes, enforces `expires_at > created_at`, rejects an earlier revocation time, and indexes active sessions by user.
+- **Identity adapter:** active users and all role bindings are read with parameterized SQL. Disabled users return empty; foreign role ownership, malformed rows, duplicate users and invalid role codes fail closed.
+- **Session adapter:** session creation, active lookup and idempotent revocation use prepared statements. Malformed hashes are rejected before SQL; database failures map to retryable `SESSION_STORE_UNAVAILABLE`.
+- **GREEN database:** `mvn -pl platform-persistence -Dtest=DatabaseFoundationTest test` passed 12 tests.
+- **GREEN adapters:** `mvn -pl platform-app -am "-Dtest=JdbcAdminIdentityResolverTest,JdbcAdminSessionStoreTest" "-Dsurefire.failIfNoSpecifiedTests=false" test` passed 28 tests.
+- **Full GREEN:** `mvn verify`
+- **Result:** 309 tests, 0 failures, 0 errors, 0 skipped.
+- **Coverage:** runtime line 96.15%, branch 81.55%.
+- **Known gaps:** no HTTP login/logout endpoint, password verifier, login rate limit, secure cookie/CSRF filter, MFA verifier, control-plane database role grant or expired-session cleanup. None of these are claimed by this slice.
+
 ## Git Checkpoints
 
 | Slice | RED | GREEN | Follow-up |
@@ -239,26 +255,27 @@
 | Staging post-auth smoke harness | n/a | `c157dff` | Real staging execution remains blocked |
 | Route templates and target lookup | `8023928` | `8e446be` | V5 route signature and target function |
 | Single API proxy | `24c0409` | `1ba8503` | Header allowlist, SSRF baseline, 502/504; `75d31b9` root-locale normalization |
+| Admin session persistence | `c91b87d` | current GREEN checkpoint | V6 hash-only sessions and JDBC adapters |
 
 ## Final Verification
 
 - **Command:** `mvn verify`
 - **Result:** BUILD SUCCESS
-- **Contract tests:** 13 passed
+- **Contract tests:** 14 passed
 - **Flow validator tests:** 21 passed
 - **Gateway tests:** 143 passed
 - **Publication guard tests:** 9 passed
-- **PostgreSQL tests:** 24 passed
-- **Runtime tests:** 55 passed
-- **Total tests:** 265 passed, 0 failed, 0 errors, 0 skipped
-- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 93.72%/branch 82.40%; control line 100%/branch 95.00%; runtime line 94.71%/branch 81.69%
+- **PostgreSQL tests:** 26 passed
+- **Runtime tests:** 83 passed
+- **Total tests:** 309 passed, 0 failed, 0 errors, 0 skipped
+- **Coverage:** orchestration line 92.98%/branch 82.81%; gateway line 93.72%/branch 82.40%; control line 100%/branch 95.00%; runtime line 96.15%/branch 81.55%
 
 ## Self Evaluation
 
 | Axis | Score | Evidence |
 | --- | --- | --- |
-| Accuracy | 5 | OpenAPI parses, all 265 tests pass, PostgreSQL route/target/RLS constraints, AWS KMS request semantics, Redis quotas, real HTTP transport and a restricted-role Tomcat proxy path are exercised, and JaCoCo gates pass. |
-| Completeness | 4 | Gate 0, HMAC, KMS, role verification, route templates, application/API authorization, pre/post-auth limits, published target lookup and single API proxy are complete. Real staging, DNS/egress enforcement, upstream auth injection, Redis Cluster, reconciliation, orchestration and usage/audit persistence remain future TDD slices. |
+| Accuracy | 5 | OpenAPI parses, all 309 tests pass, PostgreSQL route/target/session/RLS constraints, AWS KMS request semantics, Redis quotas, real HTTP transport and a restricted-role Tomcat proxy path are exercised, and JaCoCo gates pass. |
+| Completeness | 4 | Gate 0, HMAC, KMS, role verification, route templates, application/API authorization, pre/post-auth limits, published target lookup, single API proxy and admin session persistence are complete. Admin HTTP authentication, real staging, DNS/egress enforcement, upstream auth injection, Redis Cluster, reconciliation, orchestration and usage/audit persistence remain future TDD slices. |
 | Clarity | 4 | Contracts, test map and evidence report are linked and use stable error codes. The OpenAPI artifact is large and will benefit from generated documentation. |
 | Actionability | 5 | `mvn verify` is the single validation command. The contract map identifies the next RED targets. |
 | Conciseness | 4 | Test and contract artifacts are focused; the full OpenAPI file is large but serves as the authoritative consumer boundary. |
@@ -267,8 +284,8 @@
 
 **Highest-impact improvements:**
 
-1. Execute the staging smoke and proxy runbook against real KMS, PostgreSQL, Redis, TLS, DNS/egress policy and an upstream.
-2. Implement KMS/Vault-backed upstream `auth_ref`, two-instance proxy/load tests and usage reconciliation.
-3. Add orchestration execution, control-plane management APIs/UI and usage/request/audit persistence.
+1. Complete the admin login/logout HTTP boundary with password verification, MFA, login rate limiting, secure cookies and CSRF enforcement.
+2. Execute the staging smoke and proxy runbook against real KMS, PostgreSQL, Redis, TLS, DNS/egress policy and an upstream.
+3. Implement KMS/Vault-backed upstream `auth_ref`, orchestration execution, control-plane management APIs/UI and usage/request/audit persistence.
 
-**Self-check:** The 4.5 score reflects that authentication, authorization, quotas, route templates and a single-API proxy are verifiably complete locally, while real staging dependencies, DNS/egress controls, upstream credentials, control-plane workflows and orchestration are explicitly identified.
+**Self-check:** The 4.5 score reflects that public-gateway authentication, authorization, quotas, route templates, single-API proxying and administrator session persistence are verifiably complete locally, while the admin HTTP boundary, real staging dependencies, DNS/egress controls, upstream credentials, control-plane workflows and orchestration are explicitly identified.

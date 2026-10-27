@@ -554,14 +554,16 @@ class DatabaseFoundationTest {
             statement.setString(2, email);
             statement.executeUpdate();
         }
+        String scopeType = "PLATFORM_ADMIN".equals(role) ? "GLOBAL" : "TENANT";
         try (PreparedStatement statement = connection.prepareStatement("""
                 INSERT INTO iam_role_binding (
                     tenant_id, user_id, role_code, scope_type
-                ) VALUES (?, ?, ?, 'TENANT')
+                ) VALUES (?, ?, ?, ?)
                 """)) {
             statement.setObject(1, tenant);
             statement.setObject(2, user);
             statement.setString(3, role);
+            statement.setString(4, scopeType);
             statement.executeUpdate();
         }
     }

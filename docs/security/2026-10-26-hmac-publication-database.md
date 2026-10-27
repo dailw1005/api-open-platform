@@ -8,6 +8,7 @@
 - Templated application/API authorization and pre-authentication rate limiting.
 - Post-authentication application/API token buckets and UTC daily/monthly quotas.
 - Published PROXY target resolution and single API HTTP forwarding.
+- Administrator identity lookup and hash-only server-side session persistence.
 - Publication activation guard.
 - PostgreSQL foundation, credential/authorization/policy lookup migrations, composite tenant keys, RLS and active-publication triggers.
 
@@ -34,6 +35,7 @@ Redis Cluster coordination, quota reconciliation or orchestration routing is com
 | Post-auth limits | PASS | One Lua command checks application/API token buckets plus daily/monthly quotas with captured Redis time; any denial consumes no other dimension. |
 | Policy tenant integrity | PASS | Policy tables use RLS and unique scope keys; application policy rows must match the application tenant, while API policies must be platform-global. |
 | Single API proxy | PASS | Published proxy target resolution, route expansion, Header allowlists, body/query forwarding, 502/504 mapping, response bound and redirect blocking are covered. |
+| Admin session persistence | PASS | V6 stores only SHA-256 hashes, enforces positive lifetime, maps malformed state closed, re-reads active user/global-admin state and uses parameterized SQL. |
 | SSRF baseline | PASS for literal addresses | HTTPS-only targets and literal loopback/private/link-local/reserved ranges are rejected; DNS answers and egress zones require deployment controls. |
 | Injection | PASS | Database integration tests use prepared statements; migrations use static SQL and typed parameters. |
 | Tenant isolation | PASS | Composite foreign keys, RLS policies and cross-tenant insert/select tests pass on PostgreSQL 18.6. |
@@ -203,6 +205,20 @@ Redis Cluster coordination, quota reconciliation or orchestration routing is com
 - **Severity:** Medium
 - **Residual risk:** `upstream_environment.auth_ref` is not injected, response bodies are buffered up to 1 MiB, and retry policy is absent.
 - **Required follow-up:** Add a KMS/Vault-backed upstream auth adapter, streaming bounds for large media, and explicit idempotency-aware retry rules.
+
+### Open prerequisite: administrator HTTP authentication is not exposed yet
+
+- **Severity:** High if the persistence adapters were treated as a completed login feature
+- **Residual risk:** There is no login/logout Controller, Argon2id verifier, MFA verifier, login rate limiter, secure cookie response, session authentication Filter, CSRF enforcement or control-plane database role grant.
+- **Current control:** No administrator HTTP endpoint is exposed by this slice, so raw tokens cannot be issued or accepted yet.
+- **Required follow-up:** Complete the HTTP boundary before enabling control-plane routes, then add login success/failure, CSRF, fixation, rotation, expiry and logout integration tests.
+
+### Accepted: expired administrator sessions require cleanup
+
+- **Severity:** Low for authentication, Medium for storage growth
+- **Residual risk:** Session authentication rejects and revokes expired rows, but no scheduled retention job removes old rows.
+- **Required follow-up:** Add a bounded, audited cleanup job after the HTTP session flow is complete.
+
 ## Verdict
 
 No unresolved High finding remains in the implemented and locally tested
