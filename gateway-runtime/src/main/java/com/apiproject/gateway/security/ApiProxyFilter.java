@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -204,7 +205,7 @@ public final class ApiProxyFilter implements Filter {
     ) throws IOException {
         response.setStatus(upstream.status());
         upstream.headers().forEach((name, values) -> {
-            if (RESPONSE_HEADERS.contains(name.toLowerCase())) {
+            if (RESPONSE_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {
                 values.forEach(value -> response.addHeader(name, value));
             }
         });
