@@ -176,6 +176,25 @@ class OpenApiContractTest {
     }
 
     @Test
+    void adminSessionLoginPublishesSessionCookieAndCsrfToken() {
+        JsonNode headers = rawContract.path("paths")
+                .path("/platform-admin/v1/sessions")
+                .path("post")
+                .path("responses")
+                .path("200")
+                .path("headers");
+
+        assertEquals(
+                "#/components/headers/SessionCookie",
+                headers.path("Set-Cookie").path("$ref").asText()
+        );
+        assertEquals(
+                "#/components/headers/CsrfToken",
+                headers.path("X-CSRF-Token").path("$ref").asText()
+        );
+    }
+
+    @Test
     void viewerCannotPerformWriteOperationsExceptLogout() {
         operations.forEach((operationId, operation) -> {
             String role = String.valueOf(operation.getExtensions().get("x-required-role"));
