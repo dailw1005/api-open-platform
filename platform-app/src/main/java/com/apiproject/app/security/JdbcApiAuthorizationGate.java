@@ -3,26 +3,41 @@ package com.apiproject.app.security;
 import com.apiproject.gateway.security.ApiAuthorizationException;
 import com.apiproject.gateway.security.ApiAuthorizationGate;
 import com.apiproject.gateway.security.AuthorizedApi;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
 public final class JdbcApiAuthorizationGate implements ApiAuthorizationGate {
 
     private static final String AUTHORIZATION_SQL = """
-            SELECT decision, app_id, api_id, api_version_id, tenant_id, visibility
+            SELECT
+                decision, app_id, api_id, api_version_id, tenant_id, visibility,
+                route_params
             FROM auth_authorize_public_api(?, ?, ?)
             """;
 
     private final DataSource dataSource;
+    private final ObjectMapper objectMapper;
 
     public JdbcApiAuthorizationGate(DataSource dataSource) {
+        this(dataSource, new ObjectMapper());
+    }
+
+    public JdbcApiAuthorizationGate(
+            DataSource dataSource,
+            ObjectMapper objectMapper
+    ) {
         this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
     }
 
     @Override
@@ -57,6 +72,9 @@ public final class JdbcApiAuthorizationGate implements ApiAuthorizationGate {
                 );
                 UUID tenantId = resultSet.getObject("tenant_id", UUID.class);
                 String visibility = resultSet.getString("visibility");
+                Map<String, String> routeParameters = readRouteParameters(
+                        resultSet.getString("route_params")
+                );
                 if (appId == null
                         || apiId == null
                         || apiVersionId == null
@@ -78,7 +96,8 @@ public final class JdbcApiAuthorizationGate implements ApiAuthorizationGate {
                         apiId,
                         apiVersionId,
                         tenantId,
-                        visibility
+                        visibility,
+                        routeParameters
                 );
             }
         } catch (SQLException exception) {
@@ -86,6 +105,41 @@ public final class JdbcApiAuthorizationGate implements ApiAuthorizationGate {
                     "AUTHORIZATION_STORE_UNAVAILABLE",
                     true,
                     "Authorization store is unavailable",
+                    exception
+            );
+        }
+    }
+
+    private Map<String, String> readRouteParameters(String json) {
+        if (json == null) {
+            throw internalConfiguration(
+                    "Authorization lookup omitted route parameters",
+                    null
+            );
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (!node.isObject()) {
+                throw internalConfiguration(
+                        "Authorization route parameters are not an object",
+                        null
+                );
+            }
+            Map<String, String> parameters = new LinkedHashMap<>();
+            node.fields().forEachRemaining(entry -> {
+                if (!entry.getValue().isTextual()) {
+                    throw new IllegalArgumentException(
+                            "route parameter value is not text"
+                    );
+                }
+                parameters.put(entry.getKey(), entry.getValue().textValue());
+            });
+            return parameters;
+        } catch (ApiAuthorizationException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw internalConfiguration(
+                    "Authorization route parameters are invalid",
                     exception
             );
         }

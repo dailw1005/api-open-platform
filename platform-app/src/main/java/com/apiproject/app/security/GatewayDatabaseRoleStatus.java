@@ -5,6 +5,7 @@ public record GatewayDatabaseRoleStatus(
         boolean credentialFunctionExecute,
         boolean authorizationFunctionExecute,
         boolean policyFunctionExecute,
+        boolean targetFunctionExecute,
         boolean superuser,
         boolean bypassRls,
         boolean directCredentialAccess
